@@ -1,0 +1,20 @@
+# Local machine configuration - contains absolute SDK path, never commit.
+local.properties
+
+# Build output
+.gradle/
+build/
+app/build/
+captures/
+.cxx/
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Keystores and secrets - this app ships no API keys, but never commit signing material.
+*.jks
+*.keystore
+keystore.properties
+secrets.properties

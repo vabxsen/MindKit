@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches LocalAiLightColorScheme.background so the launch window does not flash. -->
+    <color name="window_background">#F7FAF8</color>
+    <color name="icon_background">#0B0D0E</color>
+</resources>

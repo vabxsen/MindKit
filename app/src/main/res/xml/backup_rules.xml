@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Local results are deliberately excluded from cloud backup: the point of the app is that
+  processed content stays on the device the user processed it on. Preferences are small
+  and non-sensitive, so they are allowed to restore.
+-->
+<full-backup-content>
+    <exclude domain="database" path="local_ai.db" />
+    <exclude domain="database" path="local_ai.db-shm" />
+    <exclude domain="database" path="local_ai.db-wal" />
+</full-backup-content>

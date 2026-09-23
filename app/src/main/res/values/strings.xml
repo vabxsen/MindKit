@@ -1,0 +1,487 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  All user-visible text lives here so the app can be localised without touching Kotlin.
+  Strings that are purely technical (developer/debug surfaces) are still externalised for
+  consistency. Nothing here is formatted at runtime by string concatenation in Kotlin;
+  placeholders use positional arguments so translators can reorder them.
+-->
+<resources>
+
+    <!-- App identity. Replace app_name to rebrand; nothing references the literal. -->
+    <string name="app_name">MindKit</string>
+    <string name="app_tagline">Private AI tools that run on your device.</string>
+
+    <!-- Bottom navigation -->
+    <string name="nav_home">Workspace</string>
+    <string name="nav_history">History</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Generic actions -->
+    <string name="action_copy">Copy</string>
+    <string name="action_share">Share</string>
+    <string name="action_save">Save</string>
+    <string name="action_saved">Saved</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_regenerate">Regenerate</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_delete_all">Delete all</string>
+    <string name="action_back">Back</string>
+    <string name="action_close">Close</string>
+    <string name="action_done">Done</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_skip">Skip</string>
+    <string name="action_stop">Stop</string>
+    <string name="action_send">Send</string>
+    <string name="action_apply">Apply</string>
+    <string name="action_download_model">Download model</string>
+    <string name="action_open">Open</string>
+    <string name="action_more">More options</string>
+    <string name="action_paste">Paste</string>
+    <string name="action_swap">Swap languages</string>
+    <string name="action_choose_photo">Choose a photo</string>
+    <string name="action_take_photo">Take a photo</string>
+    <string name="action_choose_audio">Choose an audio file</string>
+    <string name="action_record">Record</string>
+    <string name="action_learn_more">Learn more</string>
+    <string name="action_refresh">Refresh</string>
+
+    <string name="copied_to_clipboard">Copied</string>
+    <string name="saved_to_history">Saved to history</string>
+    <string name="history_disabled_not_saved">History is turned off, so this was not saved</string>
+
+    <!-- Home -->
+    <string name="home_title">MindKit</string>
+    <string name="home_tools_header">Tools</string>
+    <string name="home_field_notes_tagline">Offline tools for clearer work</string>
+    <string name="home_workspace_title">Your private workspace</string>
+    <string name="home_workspace_body">Everything happens on this device.</string>
+    <string name="home_new_task">New task</string>
+    <string name="home_new_task_body">Start with text, an image, or your voice</string>
+    <string name="home_add_text">Add text</string>
+    <string name="home_add_image">Add image</string>
+    <string name="home_add_audio">Add audio</string>
+    <string name="home_start_with">Start with</string>
+    <string name="home_recent">Recent</string>
+    <string name="home_recent_empty">Saved work will appear here</string>
+    <string name="home_device_section">Device</string>
+    <string name="home_models_ready">Models ready</string>
+    <string name="home_models_checking">Checking local models</string>
+    <string name="history_subtitle">Everything you save stays on this device.</string>
+    <string name="settings_subtitle">Shape your private workspace.</string>
+    <string name="home_status_ready">AI Ready</string>
+    <string name="home_status_limited">Limited Device Support</string>
+    <string name="home_status_model_required">Model Required</string>
+    <string name="home_status_checking">Checking device</string>
+    <string name="home_status_ready_description">On-device AI features are ready to use</string>
+    <string name="home_status_limited_description">Some AI features are not supported on this device</string>
+    <string name="home_status_model_required_description">One or more AI models still need to be downloaded</string>
+
+    <!-- Tool titles and descriptions -->
+    <string name="tool_ask_title">Ask AI</string>
+    <string name="tool_ask_description">Ask a question and get an answer on your device.</string>
+    <string name="tool_summarize_title">Summarize</string>
+    <string name="tool_summarize_description">Turn long text into key points.</string>
+    <string name="tool_rewrite_title">Rewrite</string>
+    <string name="tool_rewrite_description">Change the tone or length of your text.</string>
+    <string name="tool_proofread_title">Proofread</string>
+    <string name="tool_proofread_description">Fix spelling and grammar.</string>
+    <string name="tool_ocr_title">Extract Text</string>
+    <string name="tool_ocr_description">Pull text out of a photo or screenshot.</string>
+    <string name="tool_translate_title">Translate</string>
+    <string name="tool_translate_description">Translate offline with downloaded languages.</string>
+    <string name="tool_image_title">Image AI</string>
+    <string name="tool_image_description">Analyze and describe images.</string>
+    <string name="tool_transcribe_title">Transcribe</string>
+    <string name="tool_transcribe_description">Turn speech into text.</string>
+    <string name="tool_developer_title">Developer</string>
+    <string name="tool_developer_description">Format, decode and explain developer data.</string>
+
+    <!-- Capability labels -->
+    <string name="capability_on_device">On-device</string>
+    <string name="capability_download_required">Download required</string>
+    <string name="capability_downloading">Downloading</string>
+    <string name="capability_unsupported">Not supported on this device</string>
+    <string name="capability_temporarily_unavailable">Temporarily unavailable</string>
+    <string name="capability_error">Check failed</string>
+    <string name="capability_checking">Checking</string>
+
+    <string name="provider_gemini_nano">Gemini Nano</string>
+    <string name="provider_ml_kit">ML Kit on-device</string>
+    <string name="provider_android_platform">Android on-device</string>
+    <string name="provider_on_device_algorithm">Runs locally</string>
+    <string name="provider_fake">Sample engine</string>
+    <string name="provider_none">Unavailable</string>
+
+    <string name="badge_local">Local</string>
+    <string name="badge_local_description">This request is processed on your device</string>
+
+    <!-- Loading phases. Each names the work so no spinner is unexplained. -->
+    <string name="loading_checking_availability">Checking AI availability…</string>
+    <string name="loading_preparing_model">Preparing model…</string>
+    <string name="loading_downloading_model">Downloading model…</string>
+    <string name="loading_downloading_model_percent">Downloading model %1$d%%</string>
+    <string name="loading_analyzing">Analyzing locally…</string>
+    <string name="loading_generating">Generating…</string>
+    <string name="loading_transcribing">Transcribing…</string>
+    <string name="loading_extracting_text">Extracting text…</string>
+    <string name="loading_translating">Translating…</string>
+    <string name="loading_summarizing">Summarizing…</string>
+    <string name="loading_rewriting">Rewriting…</string>
+    <string name="loading_proofreading">Proofreading…</string>
+    <string name="loading_describing_image">Describing image…</string>
+
+    <!-- Errors. Never a stack trace; technical detail is opt-in via Settings. -->
+    <string name="error_unsupported">This AI feature isn\'t supported on your device.</string>
+    <string name="error_model_not_downloaded">The on-device AI model needs to be downloaded first.</string>
+    <string name="error_download_failed">Model download failed.</string>
+    <string name="error_busy">The AI engine is currently busy. Try again shortly.</string>
+    <string name="error_quota_exceeded">The device has temporarily reached its AI processing limit.</string>
+    <string name="error_background_blocked">This feature can only run while MindKit is open.</string>
+    <string name="error_input_too_long">That text is too long for the on-device model. Try a shorter piece.</string>
+    <string name="error_input_too_short">That text is too short to process.</string>
+    <string name="error_invalid_image">That image couldn\'t be used. Try a different one.</string>
+    <string name="error_not_enough_storage">There isn\'t enough free storage to download the model.</string>
+    <string name="error_needs_system_update">Your device needs a system update before this feature can run.</string>
+    <string name="error_cancelled">Cancelled.</string>
+    <string name="error_unknown">Something went wrong. Please try again.</string>
+    <string name="error_no_text_detected">No text was detected in this image.</string>
+    <string name="error_file_open_failed">The selected file couldn\'t be opened.</string>
+    <string name="error_empty_input">Enter some text first.</string>
+    <string name="error_technical_detail">Technical detail: %1$s</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_page1_title">Private AI on your phone</string>
+    <string name="onboarding_page1_body">Run useful AI tools directly on your Android device.</string>
+    <string name="onboarding_page2_title">Works offline</string>
+    <string name="onboarding_page2_body">Supported tools continue working without an internet connection.</string>
+    <string name="onboarding_page3_title">Your device decides</string>
+    <string name="onboarding_page3_body">Some advanced features require compatible Gemini Nano hardware.</string>
+    <string name="onboarding_check_device">Check My Device</string>
+    <string name="onboarding_results_title">What your device supports</string>
+    <string name="onboarding_get_started">Get started</string>
+    <string name="onboarding_page_indicator">Page %1$d of %2$d</string>
+
+    <!-- History -->
+    <string name="history_title">History</string>
+    <string name="history_search_hint">Search results</string>
+    <string name="history_empty_title">Nothing here yet.</string>
+    <string name="history_empty_body">Your locally processed results will appear here.</string>
+    <string name="history_no_matches_title">No matching results</string>
+    <string name="history_no_matches_body">Try a different search or clear the filters.</string>
+    <string name="history_filter_all">All</string>
+    <string name="history_delete_all_title">Delete all history?</string>
+    <string name="history_delete_all_body">This permanently removes every locally stored result. It can\'t be undone.</string>
+    <string name="history_item_deleted">Deleted</string>
+    <string name="history_type_ask">Ask AI</string>
+    <string name="history_type_summary">Summary</string>
+    <string name="history_type_rewrite">Rewrite</string>
+    <string name="history_type_proofread">Proofread</string>
+    <string name="history_type_ocr">Extracted text</string>
+    <string name="history_type_translation">Translation</string>
+    <string name="history_type_image_description">Image description</string>
+    <string name="history_type_transcription">Transcription</string>
+    <string name="history_type_developer">Developer</string>
+    <string name="history_detail_title">Result</string>
+    <string name="history_detail_input">Input</string>
+    <string name="history_detail_output">Output</string>
+    <string name="history_detail_missing">This result is no longer available.</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_dynamic_color">Dynamic color</string>
+    <string name="settings_dynamic_color_summary">Use colors from your wallpaper</string>
+    <string name="settings_dynamic_color_unsupported">Requires Android 12 or newer</string>
+
+    <string name="settings_section_ai">AI</string>
+    <string name="settings_device_ai">Device AI status</string>
+    <string name="settings_device_ai_summary">See what this device supports</string>
+    <string name="settings_models">Models</string>
+    <string name="settings_models_summary">Manage downloaded translation languages</string>
+
+    <string name="settings_section_privacy">Privacy</string>
+    <string name="settings_save_history">Save history</string>
+    <string name="settings_save_history_summary">Keep results on this device</string>
+    <string name="settings_clear_history">Clear history</string>
+    <string name="settings_clear_history_summary">Remove every stored result</string>
+    <string name="settings_clear_data">Clear all local data</string>
+    <string name="settings_clear_data_summary">Remove history and reset preferences</string>
+    <string name="settings_privacy_info">Privacy information</string>
+
+    <string name="settings_section_about">About</string>
+    <string name="settings_version">App version</string>
+    <string name="settings_licenses">Open source licenses</string>
+    <string name="settings_device_info">Device capability information</string>
+    <string name="about_licenses_summary">Opens the terms for the on-device ML components this app uses</string>
+    <string name="about_offline_note">MindKit needs no account and no server. A network connection is only used when you ask Android to download an on-device model.</string>
+
+    <string name="settings_section_developer">Developer</string>
+    <string name="settings_verbose_errors">Verbose error details</string>
+    <string name="settings_verbose_errors_summary">Show technical detail alongside error messages</string>
+    <string name="settings_debug_capability">Debug AI capability</string>
+
+    <string name="settings_clear_data_title">Clear all local data?</string>
+    <string name="settings_clear_data_body">This deletes your history and resets your preferences. Models managed by Android or Google Play services are not removed.</string>
+    <string name="settings_clear_data_done">Local data cleared</string>
+
+    <!-- Privacy screen -->
+    <string name="privacy_title">Privacy</string>
+    <string name="privacy_headline">Built to keep your content on your device.</string>
+    <string name="privacy_point_local">MindKit processing stays on the device when using on-device features.</string>
+    <string name="privacy_point_no_account">No account required.</string>
+    <string name="privacy_point_no_analytics">No application analytics.</string>
+    <string name="privacy_point_no_ads">No advertisements.</string>
+    <string name="privacy_point_no_tracking">No user tracking.</string>
+    <string name="privacy_point_no_upload">No private content is uploaded by this app for local features.</string>
+    <string name="privacy_permissions_title">Why each permission exists</string>
+    <string name="privacy_permission_internet">Internet: used only by Google Play services and ML Kit to download on-device models you ask for. No content you enter is sent anywhere by this app.</string>
+    <string name="privacy_permission_microphone">Microphone: requested only when you start a microphone transcription, and only for as long as you are recording.</string>
+    <string name="privacy_permission_camera">Camera: not requested. Images come from the Android photo picker, which hands over only the item you choose.</string>
+    <string name="privacy_caveat_title">What this app cannot promise</string>
+    <string name="privacy_caveat_body">On-device models are provided by Android and Google Play services. This app does not control how those system components behave, and it does not remove models the system owns.</string>
+
+    <!-- Device AI screen -->
+    <string name="device_ai_title">Device AI</string>
+    <string name="device_ai_gemini_nano">Gemini Nano</string>
+    <string name="device_ai_model">Model</string>
+    <string name="device_ai_capabilities">Capabilities</string>
+    <string name="device_ai_unknown_model">Not reported</string>
+    <string name="device_ai_available">Available</string>
+    <string name="device_ai_unavailable">Unavailable</string>
+    <string name="device_ai_last_checked">Last checked %1$s</string>
+    <string name="device_ai_refresh">Re-check device</string>
+    <string name="device_ai_task_ask">Ask AI</string>
+    <string name="device_ai_task_summarize">Summarization</string>
+    <string name="device_ai_task_rewrite">Rewriting</string>
+    <string name="device_ai_task_proofread">Proofreading</string>
+    <string name="device_ai_task_image_description">Image description</string>
+    <string name="device_ai_task_image_question">Image questions</string>
+    <string name="device_ai_task_advanced_transcription">Advanced transcription</string>
+    <string name="device_ai_task_basic_transcription">Basic transcription</string>
+    <string name="device_ai_task_text_recognition">Text recognition (OCR)</string>
+    <string name="device_ai_task_translation">Offline translation</string>
+    <string name="device_ai_download_state_not_downloaded">Not downloaded</string>
+    <string name="device_ai_download_state_downloading">Downloading %1$d%%</string>
+    <string name="device_ai_download_state_ready">Ready</string>
+    <string name="device_ai_download_state_failed">Failed</string>
+    <string name="device_ai_explanation">Gemini Nano availability depends on your device model, its system version, AICore, and which feature models have been installed. These results come from runtime checks on this device.</string>
+
+    <!-- Shared availability gate -->
+    <string name="gate_download_title">Download the on-device model</string>
+    <string name="gate_download_body">This feature is supported here, but Android needs to download its model first. After that it runs offline.</string>
+    <string name="gate_unsupported_title">Not available on this device</string>
+    <string name="gate_unsupported_body">On-device AI isn\'t available for this feature on your device.</string>
+    <string name="gate_check_failed">The availability check didn\'t complete.</string>
+
+    <!-- Ask AI -->
+    <string name="ask_input_hint">Ask something</string>
+    <string name="ask_empty_title">Ask something.</string>
+    <string name="ask_empty_body">Answers are generated by the model on your device.</string>
+    <string name="ask_new_conversation">New conversation</string>
+    <string name="ask_clear_conversation">Clear conversation</string>
+    <string name="ask_you">You</string>
+    <string name="ask_assistant">MindKit</string>
+    <string name="ask_info_title">Where does this run?</string>
+    <string name="ask_info_body">Prompts and answers are processed by Gemini Nano on this device. Your conversation is not uploaded by this app, and it is not kept after you clear it unless you save a result to history.</string>
+    <string name="ask_stop">Stop generating</string>
+
+    <!-- Summarize -->
+    <string name="summarize_input_hint">Paste or type the text to summarize</string>
+    <string name="summarize_input_type">Input type</string>
+    <string name="summarize_type_article">Article</string>
+    <string name="summarize_type_conversation">Conversation</string>
+    <string name="summarize_length">Summary length</string>
+    <string name="summarize_length_short">Short</string>
+    <string name="summarize_length_medium">Medium</string>
+    <string name="summarize_length_detailed">Detailed</string>
+    <string name="summarize_length_explainer">The on-device model summarizes into bullet points: Short is one bullet, Medium two, Detailed three.</string>
+    <string name="summarize_action">Summarize</string>
+    <string name="summarize_result_label">Summary</string>
+    <string name="summarize_char_count">%1$d characters</string>
+
+    <!-- Rewrite -->
+    <string name="rewrite_input_hint">Text to rewrite</string>
+    <string name="rewrite_style">Style</string>
+    <string name="rewrite_style_rephrase">Rephrase</string>
+    <string name="rewrite_style_professional">Professional</string>
+    <string name="rewrite_style_friendly">Friendly</string>
+    <string name="rewrite_style_shorten">Shorten</string>
+    <string name="rewrite_style_elaborate">Elaborate</string>
+    <string name="rewrite_style_emojify">Emojify</string>
+    <string name="rewrite_action">Rewrite</string>
+    <string name="rewrite_result_label">Rewritten</string>
+    <string name="rewrite_original_label">Original</string>
+    <string name="rewrite_show_original">Compare with original</string>
+    <string name="rewrite_hide_original">Hide original</string>
+    <string name="rewrite_accept">Use this version</string>
+    <string name="rewrite_accepted">Replaced your text with this version</string>
+
+    <!-- Proofread -->
+    <string name="proofread_input_hint">Text to proofread</string>
+    <string name="proofread_action">Proofread</string>
+    <string name="proofread_original_label">Original</string>
+    <string name="proofread_result_label">Suggested version</string>
+    <string name="proofread_no_changes">No changes suggested. The text already looks correct to the model.</string>
+    <string name="proofread_input_source">Written using</string>
+    <string name="proofread_source_keyboard">Keyboard</string>
+    <string name="proofread_source_voice">Voice</string>
+    <string name="proofread_apply">Apply</string>
+
+    <!-- Developer tools -->
+    <string name="dev_section_utilities">Utilities</string>
+    <string name="dev_section_utilities_subtitle">Deterministic tools. No model, no download, works on every device.</string>
+    <string name="dev_section_ai">With on-device AI</string>
+    <string name="dev_section_ai_subtitle">These use Gemini Nano and need a compatible device.</string>
+    <string name="dev_no_ai_needed">No AI needed</string>
+    <string name="dev_output_label">Output</string>
+    <string name="dev_direction">Direction</string>
+    <string name="dev_encode">Encode</string>
+    <string name="dev_decode">Decode</string>
+    <string name="dev_language">Language</string>
+    <string name="dev_run_action">Run</string>
+    <string name="dev_format_action">Format</string>
+    <string name="dev_validate_action">Validate</string>
+    <string name="dev_generate_action">Generate</string>
+    <string name="dev_explain_action">Explain</string>
+
+    <string name="dev_explain_error_title">Explain Error</string>
+    <string name="dev_explain_error_description">Paste a stack trace or error message and get a structured explanation.</string>
+    <string name="dev_explain_error_hint">Paste the error or stack trace</string>
+    <string name="dev_explain_code_title">Explain Code</string>
+    <string name="dev_explain_code_description">Understand what a snippet does and what to watch out for.</string>
+    <string name="dev_explain_code_hint">Paste the code</string>
+
+    <string name="dev_json_format_title">JSON Formatter</string>
+    <string name="dev_json_format_description">Pretty-print JSON with the original key order preserved.</string>
+    <string name="dev_json_validate_title">JSON Validator</string>
+    <string name="dev_json_validate_description">Strict validation that reports the exact line and column.</string>
+    <string name="dev_json_hint">Paste JSON</string>
+    <string name="dev_json_valid">Valid JSON</string>
+    <string name="dev_json_invalid">That isn\'t valid JSON.</string>
+
+    <string name="dev_base64_title">Base64</string>
+    <string name="dev_base64_description">Encode or decode Base64, including the URL-safe alphabet.</string>
+    <string name="dev_base64_hint">Text or Base64</string>
+    <string name="dev_base64_invalid">That isn\'t valid Base64 text.</string>
+
+    <string name="dev_url_title">URL Encode / Decode</string>
+    <string name="dev_url_description">Percent-encode or decode a URL component.</string>
+    <string name="dev_url_hint">Text or encoded URL</string>
+    <string name="dev_url_invalid">That couldn\'t be URL decoded.</string>
+
+    <string name="dev_jwt_title">JWT Decoder</string>
+    <string name="dev_jwt_description">Read the header and payload of a token. The signature is not verified.</string>
+    <string name="dev_jwt_hint">Paste a JWT</string>
+    <string name="dev_jwt_invalid">That doesn\'t look like a JWT.</string>
+
+    <string name="dev_uuid_title">UUID Generator</string>
+    <string name="dev_uuid_description">Generate random version 4 UUIDs.</string>
+    <string name="dev_uuid_count">How many</string>
+
+    <string name="dev_hash_title">Hash Generator</string>
+    <string name="dev_hash_description">MD5, SHA-1, SHA-256 and SHA-512 digests.</string>
+    <string name="dev_hash_hint">Text to hash</string>
+    <string name="dev_hash_algorithm">Algorithm</string>
+
+    <string name="dev_timestamp_title">Timestamp Converter</string>
+    <string name="dev_timestamp_description">Convert between epoch time and readable dates.</string>
+    <string name="dev_timestamp_hint">Epoch seconds, milliseconds, or an ISO 8601 date</string>
+    <string name="dev_timestamp_now">Use current time</string>
+    <string name="dev_timestamp_invalid">That isn\'t a timestamp this tool recognizes.</string>
+
+    <string name="dev_lang_android">Android</string>
+    <string name="dev_lang_kotlin">Kotlin</string>
+    <string name="dev_lang_gradle">Gradle</string>
+    <string name="dev_lang_java">Java</string>
+    <string name="dev_lang_python">Python</string>
+    <string name="dev_lang_javascript">JavaScript</string>
+    <string name="dev_lang_generic">Generic</string>
+
+    <!-- Share router -->
+    <string name="share_title">Shared content detected</string>
+    <string name="share_kind_text">Text</string>
+    <string name="share_kind_image">Image</string>
+    <string name="share_kind_audio">Audio</string>
+    <string name="share_what_would_you_like">What would you like to do?</string>
+    <string name="share_nothing_to_do">MindKit can\047t do anything with this kind of content yet.</string>
+
+    <!-- Transcribe -->
+    <string name="transcribe_mode_basic">Basic</string>
+    <string name="transcribe_mode_advanced">Advanced</string>
+    <string name="transcribe_empty_title">Choose an audio file or start recording.</string>
+    <string name="transcribe_empty_body">Speech is turned into text on your device.</string>
+    <string name="transcribe_listening">Listening…</string>
+    <string name="transcribe_stop">Stop recording</string>
+    <string name="transcribe_result_label">Transcript</string>
+    <string name="transcribe_unsupported_body">This device has no on-device speech recognition that MindKit can use without sending audio to a server.</string>
+    <string name="transcribe_no_file_support">Audio files need the on-device GenAI recognizer, which this device does not provide. Recording still works.</string>
+
+    <!-- Image AI -->
+    <string name="image_mode_describe">Describe</string>
+    <string name="image_mode_ask">Ask about it</string>
+    <string name="image_empty_title">Choose an image to analyze.</string>
+    <string name="image_empty_body">The image is processed on your device and is never uploaded by this app.</string>
+    <string name="image_selected">The image you selected</string>
+    <string name="image_local_note">This image is processed on your device</string>
+    <string name="image_question_hint">What would you like to know?</string>
+    <string name="image_describe_action">Describe image</string>
+    <string name="image_ask_action">Ask</string>
+    <string name="image_description_label">Description</string>
+    <string name="image_answer_label">Answer</string>
+    <string name="image_run_ocr">Extract text from this image</string>
+    <string name="image_prompt_whats_in_this">What is in this image?</string>
+    <string name="image_prompt_explain_screenshot">Explain this screenshot.</string>
+    <string name="image_prompt_what_error">What error is shown?</string>
+    <string name="image_prompt_describe_ui">Describe this UI.</string>
+    <string name="image_prompt_summarize_diagram">Summarize this diagram.</string>
+
+    <!-- Extract Text -->
+    <string name="ocr_empty_title">Choose a photo containing text.</string>
+    <string name="ocr_empty_body">Text recognition runs entirely on your device, with or without a connection.</string>
+    <string name="ocr_selected_image">The image you selected</string>
+    <string name="ocr_result_label">Extracted text</string>
+    <string name="ocr_choose_another">Choose another photo</string>
+
+    <!-- Translate -->
+    <string name="translate_source">From</string>
+    <string name="translate_target">To</string>
+    <string name="translate_detect">Detect language</string>
+    <string name="translate_detected">Detected: %1$s</string>
+    <string name="translate_input_hint">Enter text to translate</string>
+    <string name="translate_action">Translate</string>
+    <string name="translate_result_label">Translation</string>
+    <string name="translate_empty_title">Translate without a connection.</string>
+    <string name="translate_empty_body">Download a language once and it keeps working offline.</string>
+    <string name="translate_model_needed_title">Language pack needed</string>
+    <string name="translate_model_needed_body">%1$s has to be downloaded before it can be used offline.</string>
+    <string name="translate_download_language">Download %1$s</string>
+    <string name="translate_downloading_language">Downloading %1$s…</string>
+    <string name="translate_pick_language">Select a language</string>
+    <string name="translate_same_language">Pick two different languages.</string>
+    <string name="translate_wifi_only">Download over Wi-Fi only</string>
+
+    <!-- Models -->
+    <string name="models_title">Models</string>
+    <string name="models_translation_header">Translation languages</string>
+    <string name="models_downloaded">Downloaded</string>
+    <string name="models_not_downloaded">Not downloaded</string>
+    <string name="models_download">Download</string>
+    <string name="models_delete">Delete</string>
+    <string name="models_search_hint">Search languages</string>
+    <string name="models_explanation">Language packs are downloaded by Google Play services and stored by the system. Deleting one here removes it from this device.</string>
+    <string name="models_downloaded_count">%1$d downloaded</string>
+    <string name="models_genai_header">On-device AI features</string>
+    <string name="models_genai_explanation">Gemini Nano feature models are installed and updated by Android. MindKit can ask for a download but does not manage or delete them.</string>
+
+
+    <!-- Accessibility -->
+    <string name="cd_tool_unavailable">%1$s, not supported on this device</string>
+    <string name="cd_navigate_up">Navigate up</string>
+    <string name="cd_info">More information</string>
+</resources>

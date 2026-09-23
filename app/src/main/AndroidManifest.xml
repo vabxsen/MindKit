@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      PERMISSIONS - each one is here for a stated reason, and nothing else is requested.
+
+      INTERNET: the app itself never uploads user content. This is required because
+      ML Kit and Google Play services download on-device models (translation language
+      packs, and GenAI feature models) over the network when the user asks for them.
+      Once a model is present, the feature it backs works with no connection at all.
+
+      Deliberately NOT requested: READ_SMS, READ_CALL_LOG, MANAGE_EXTERNAL_STORAGE,
+      READ_EXTERNAL_STORAGE, any AccessibilityService, or any location permission.
+      Image and document selection uses the Android photo picker and the Storage Access
+      Framework, which grant per-item access without a storage permission.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      RECORD_AUDIO: requested only when the user taps record on the Transcribe screen,
+      and only for as long as that recording runs. Audio is transcribed by an on-device
+      recognizer and is never written to storage or sent anywhere by this app.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <application
+        android:name=".LocalAiApplication"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.LocalAI">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.LocalAI"
+            android:windowSoftInputMode="adjustResize">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!--
+              Share targets. Receiving content is the only way another app can push data
+              into MindKit, and it always lands on the action screen so the user picks
+              what happens next.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
