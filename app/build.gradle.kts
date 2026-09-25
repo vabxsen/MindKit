@@ -1,8 +1,50 @@
+import com.google.android.gms.oss.licenses.plugin.LicensesTask
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import groovy.json.JsonOutput
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.oss.licenses)
+}
+
+/** AGP omits its dependency report for debuggable variants; keep their notices real. */
+@CacheableTask
+abstract class DebugLicenseDependenciesTask : DefaultTask() {
+    @get:Input abstract val coordinates: ListProperty<String>
+    @get:OutputFile abstract val outputFile: RegularFileProperty
+
+    @TaskAction
+    fun generate() {
+        val dependencies = coordinates.get().distinct().sorted().map { coordinate ->
+            val parts = coordinate.split(':', limit = 3)
+            mapOf("group" to parts[0], "name" to parts[1], "version" to parts[2])
+        }
+        outputFile.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText(JsonOutput.toJson(dependencies))
+        }
+    }
+}
+
+androidComponents.onVariants(androidComponents.selector().withBuildType("debug")) { variant ->
+    val artifacts = variant.runtimeConfiguration.incoming.artifactView {
+        componentFilter { it is ModuleComponentIdentifier }
+    }.artifacts.resolvedArtifacts
+    val dependencyReport = tasks.register<DebugLicenseDependenciesTask>("${variant.name}LicenseDependencies") {
+        coordinates.set(artifacts.map { resolved ->
+            resolved.map { artifact ->
+                val id = artifact.id.componentIdentifier as ModuleComponentIdentifier
+                "${id.group}:${id.module}:${id.version}"
+            }
+        })
+        outputFile.set(layout.buildDirectory.file("generated/mindkit_licenses/${variant.name}/dependencies.json"))
+    }
+    tasks.named<LicensesTask>("${variant.name}OssLicensesTask") {
+        dependenciesJson.set(dependencyReport.flatMap { it.outputFile })
+    }
 }
 
 android {
@@ -73,6 +115,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.oss.licenses)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -129,6 +172,8 @@ dependencies {
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.androidx.room.testing)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
 
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.truth)

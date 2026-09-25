@@ -1,5 +1,10 @@
 package com.localai.toolkit.feature.rewrite
 
+import com.localai.toolkit.feature.common.HistorySaveFeedback
+import com.localai.toolkit.feature.common.ObserveHistorySaveFeedback
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -34,9 +39,7 @@ import com.localai.toolkit.core.designsystem.theme.Spacing
 import com.localai.toolkit.core.ui.messageRes
 import com.localai.toolkit.core.ui.offersRetry
 import com.localai.toolkit.core.ui.technicalDetailOrNull
-import com.localai.toolkit.core.util.copyToClipboard
-import com.localai.toolkit.core.util.shareText
-import com.localai.toolkit.core.util.shouldShowCopyConfirmation
+import com.localai.toolkit.core.ui.rememberTextActionHandler
 import com.localai.toolkit.domain.model.AiCapability
 import com.localai.toolkit.domain.model.AiCapabilityStatus
 import com.localai.toolkit.domain.model.AiProvider
@@ -64,6 +67,7 @@ fun RewriteScreen(
         capability = capability,
         downloadState = downloadState,
         verboseErrors = verboseErrors,
+        saveFeedback = viewModel.saveFeedback,
         onInputChange = viewModel::onInputChange,
         onStyleChange = viewModel::onStyleChange,
         onRewrite = viewModel::onRewrite,
@@ -100,11 +104,13 @@ internal fun RewriteContent(
     onSendTo: (ToolId) -> Unit,
     onNavigateUp: () -> Unit,
     modifier: Modifier = Modifier,
+    saveFeedback: Flow<HistorySaveFeedback> = emptyFlow(),
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    ObserveHistorySaveFeedback(saveFeedback, snackbarHostState)
     val scope = rememberCoroutineScope()
-    val copiedMessage = stringResource(R.string.copied_to_clipboard)
+    val textActions = rememberTextActionHandler(snackbarHostState)
     val acceptedMessage = stringResource(R.string.rewrite_accepted)
 
     TextToolScaffold(
@@ -164,15 +170,11 @@ internal fun RewriteContent(
                     ResultCard(
                         text = state.rewritten,
                         label = stringResource(R.string.rewrite_result_label),
-                        onCopy = {
-                            context.copyToClipboard("rewrite", state.rewritten)
-                            if (shouldShowCopyConfirmation()) {
-                                scope.launch { snackbarHostState.showSnackbar(copiedMessage) }
-                            }
-                        },
-                        onShare = { context.shareText(state.rewritten) },
+                        onCopy = { textActions.copy("rewrite", state.rewritten) },
+                        onShare = { textActions.share(state.rewritten) },
                         onSave = onSave,
                         saved = state.savedToHistory,
+                        saveEnabled = !state.isRewriting,
                         secondaryActions = listOf(
                             ResultAction(stringResource(R.string.tool_proofread_title)) {
                                 onSendTo(ToolId.PROOFREAD)
@@ -213,10 +215,8 @@ internal fun RewriteContent(
                         ResultCard(
                             text = state.comparedOriginal,
                             label = stringResource(R.string.rewrite_original_label),
-                            onCopy = {
-                                context.copyToClipboard("original", state.comparedOriginal)
-                            },
-                            onShare = { context.shareText(state.comparedOriginal) },
+                            onCopy = { textActions.copy("original", state.comparedOriginal) },
+                            onShare = { textActions.share(state.comparedOriginal) },
                         )
                     }
                 }

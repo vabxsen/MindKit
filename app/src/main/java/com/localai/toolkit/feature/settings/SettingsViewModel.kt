@@ -5,25 +5,28 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.localai.toolkit.domain.model.AppSettings
 import com.localai.toolkit.domain.model.ThemeMode
-import com.localai.toolkit.domain.repository.HistoryRepository
 import com.localai.toolkit.domain.repository.SettingsRepository
+import com.localai.toolkit.domain.usecase.SettingsActions
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /** One-shot confirmations that should appear as a snackbar rather than as screen state. */
-enum class SettingsEvent { HISTORY_CLEARED, DATA_CLEARED }
+enum class SettingsEvent { HISTORY_CLEARED, DATA_CLEARED, SAVE_FAILED, HISTORY_CLEAR_FAILED, DATA_CLEAR_FAILED }
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
-    private val historyRepository: HistoryRepository,
+    private val settingsActions: SettingsActions,
 ) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = settingsRepository.settings
@@ -33,34 +36,45 @@ class SettingsViewModel @Inject constructor(
             initialValue = AppSettings(),
         )
 
-    private val _events = MutableSharedFlow<SettingsEvent>(extraBufferCapacity = 1)
-    val events: SharedFlow<SettingsEvent> = _events.asSharedFlow()
+    private val _events = Channel<SettingsEvent>(Channel.BUFFERED)
+    val events = _events.receiveAsFlow()
+    private val _isClearing = MutableStateFlow(false)
+    val isClearing = _isClearing.asStateFlow()
 
     /** Dynamic colour is an Android 12+ platform feature, not a preference we can fake. */
     val dynamicColorSupported: Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
     fun setThemeMode(mode: ThemeMode) {
-        viewModelScope.launch { settingsRepository.setThemeMode(mode) }
+        updatePreference { settingsActions.setThemeMode(mode) }
     }
 
     fun setDynamicColor(enabled: Boolean) {
-        viewModelScope.launch { settingsRepository.setDynamicColor(enabled) }
+        if (dynamicColorSupported) updatePreference { settingsActions.setDynamicColor(enabled) }
     }
 
     fun setSaveHistory(enabled: Boolean) {
-        viewModelScope.launch { settingsRepository.setSaveHistory(enabled) }
+        updatePreference { settingsActions.setSaveHistory(enabled) }
     }
 
     fun setVerboseErrors(enabled: Boolean) {
-        viewModelScope.launch { settingsRepository.setVerboseErrors(enabled) }
+        updatePreference { settingsActions.setVerboseErrors(enabled) }
     }
 
-    fun clearHistory() {
+    private fun updatePreference(submit: () -> Deferred<Unit>) {
+        if (_isClearing.value) return
+        val write = submit()
         viewModelScope.launch {
-            historyRepository.deleteAll()
-            _events.tryEmit(SettingsEvent.HISTORY_CLEARED)
+            try {
+                write.await()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _events.send(SettingsEvent.SAVE_FAILED)
+            }
         }
     }
+
+    fun clearHistory() = clearData(resetPreferences = false)
 
     /**
      * Removes everything this app owns: stored results and preferences.
@@ -69,11 +83,23 @@ class SettingsViewModel @Inject constructor(
      * managed by Google Play services for the whole device, so deleting them here would
      * reach outside this app's data and could break other apps.
      */
-    fun clearAllLocalData() {
+    fun clearAllLocalData() = clearData(resetPreferences = true)
+
+    private fun clearData(resetPreferences: Boolean) {
+        if (_isClearing.value) return
+        _isClearing.value = true
+        val clear = if (resetPreferences) settingsActions.clearAllLocalData() else settingsActions.clearHistory()
         viewModelScope.launch {
-            historyRepository.deleteAll()
-            settingsRepository.clear()
-            _events.tryEmit(SettingsEvent.DATA_CLEARED)
+            try {
+                clear.await()
+                _events.send(if (resetPreferences) SettingsEvent.DATA_CLEARED else SettingsEvent.HISTORY_CLEARED)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _events.send(if (resetPreferences) SettingsEvent.DATA_CLEAR_FAILED else SettingsEvent.HISTORY_CLEAR_FAILED)
+            } finally {
+                _isClearing.value = false
+            }
         }
     }
 }

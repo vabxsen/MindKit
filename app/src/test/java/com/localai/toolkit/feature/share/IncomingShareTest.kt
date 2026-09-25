@@ -125,4 +125,27 @@ class IncomingShareTest {
             type = mimeType
             block()
         }
+
+    @Test fun `char sequence text is accepted without requiring a String extra`() {
+        val intent = sendIntent("text/plain") {
+            putExtra(Intent.EXTRA_TEXT, StringBuilder("Shared paragraph") as CharSequence)
+        }
+        assertThat(intent.toSharedContent()).isEqualTo(SharedContent.Text("Shared paragraph"))
+    }
+
+    @Test fun `blank body falls back to a usable subject`() {
+        val intent = sendIntent("text/plain") {
+            putExtra(Intent.EXTRA_TEXT, " ")
+            putExtra(Intent.EXTRA_SUBJECT, "Subject")
+        }
+        assertThat(intent.toSharedContent()).isEqualTo(SharedContent.Text("Subject"))
+    }
+
+    @Test fun `a clip data image is accepted when EXTRA STREAM is absent`() {
+        val uri = Uri.parse("content://test/shared-image")
+        val intent = sendIntent("image/png") {
+            clipData = android.content.ClipData.newRawUri("image", uri)
+        }
+        assertThat(intent.toSharedContent()).isEqualTo(SharedContent.Image(uri))
+    }
 }

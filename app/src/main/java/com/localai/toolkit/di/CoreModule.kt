@@ -54,6 +54,11 @@ object DataStoreModule {
 abstract class RepositoryModule {
 
     @Binds
+    abstract fun bindImageLoader(
+        impl: com.localai.toolkit.core.util.ContentImageLoader,
+    ): com.localai.toolkit.core.util.ImageLoader
+
+    @Binds
     abstract fun bindSettingsRepository(impl: SettingsRepositoryImpl): SettingsRepository
 
     @Binds

@@ -19,13 +19,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
@@ -34,6 +34,7 @@ import com.localai.toolkit.core.navigation.Destination
 import com.localai.toolkit.core.navigation.LocalAiNavHost
 import com.localai.toolkit.core.designsystem.theme.FieldNotesTomato
 import com.localai.toolkit.core.designsystem.theme.FieldNotesTomatoLight
+import kotlinx.coroutines.flow.first
 
 private data class BottomNavItem(
     val route: String,
@@ -59,6 +60,21 @@ fun LocalAiApp(
     startDestination: String,
     modifier: Modifier = Modifier,
     navController: NavHostController = rememberNavController(),
+    hasPendingShare: Boolean = false,
+) {
+    LocalAiAppShell(startDestination, modifier, navController, hasPendingShare) { controller, start ->
+        LocalAiNavHost(navController = controller, startDestination = start)
+    }
+}
+
+/** The real tab/navigation shell; the graph is injectable for isolated navigation tests. */
+@Composable
+internal fun LocalAiAppShell(
+    startDestination: String,
+    modifier: Modifier = Modifier,
+    navController: NavHostController = rememberNavController(),
+    hasPendingShare: Boolean = false,
+    graph: @Composable (NavHostController, String) -> Unit,
 ) {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
@@ -90,7 +106,9 @@ fun LocalAiApp(
                                     // Single-top with state preservation: switching tabs
                                     // returns to where the user was, and does not grow
                                     // the back stack.
-                                    popUpTo(navController.graph.findStartDestination().id) {
+                                    // Home remains the tab root after onboarding has
+                                    // been removed from the back stack.
+                                    popUpTo(Destination.HOME) {
                                         saveState = true
                                     }
                                     launchSingleTop = true
@@ -114,10 +132,23 @@ fun LocalAiApp(
         },
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
-            LocalAiNavHost(
-                navController = navController,
-                startDestination = startDestination,
-            )
+            graph(navController, startDestination)
+        }
+    }
+    HandleIncomingShareNavigation(navController, hasPendingShare)
+}
+
+/** Shared by cold and warm starts; the router is never duplicated on restoration. */
+@Composable
+internal fun HandleIncomingShareNavigation(navController: NavHostController, hasPendingShare: Boolean) {
+    LaunchedEffect(navController, hasPendingShare) {
+        if (!hasPendingShare) return@LaunchedEffect
+        // Scaffold installs the NavHost during subcomposition. On recreation,
+        // this effect can start first; wait for the restored graph's entry.
+        // Clearing the pending share cancels this wait with the effect.
+        navController.currentBackStackEntryFlow.first()
+        if (navController.currentDestination?.route != Destination.SHARE_ROUTER) {
+            navController.navigate(Destination.SHARE_ROUTER) { launchSingleTop = true }
         }
     }
 }

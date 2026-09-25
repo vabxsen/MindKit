@@ -1,6 +1,5 @@
 package com.localai.toolkit.feature.settings
 
-import android.content.Intent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -8,10 +7,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import com.localai.toolkit.BuildConfig
@@ -27,11 +28,13 @@ fun AboutScreen(
     onNavigate: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val openLicenses = licenseLauncher(snackbarHostState)
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             LocalAiTopBar(
                 title = stringResource(R.string.settings_section_about),
@@ -56,13 +59,7 @@ fun AboutScreen(
             SettingsRow(
                 title = stringResource(R.string.settings_licenses),
                 summary = stringResource(R.string.about_licenses_summary),
-                onClick = {
-                    // The platform licence viewer is the honest place for this: the app
-                    // does not bundle its own copy of every dependency notice.
-                    runCatching {
-                        context.startActivity(Intent(Intent.ACTION_VIEW).setData(LICENSES_URI))
-                    }
-                },
+                onClick = openLicenses,
             )
             SettingsRow(
                 title = stringResource(R.string.settings_device_info),
@@ -81,8 +78,6 @@ fun AboutScreen(
         }
     }
 }
-
-private val LICENSES_URI = android.net.Uri.parse("https://developers.google.com/ml-kit/terms")
 
 @Preview(showBackground = true)
 @Composable

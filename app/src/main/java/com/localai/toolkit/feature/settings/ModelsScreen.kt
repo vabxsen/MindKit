@@ -21,8 +21,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
@@ -33,6 +33,7 @@ import com.localai.toolkit.R
 import com.localai.toolkit.ai.mlkit.TranslationLanguage
 import com.localai.toolkit.core.designsystem.component.ErrorCard
 import com.localai.toolkit.core.designsystem.component.LocalAiTopBar
+import com.localai.toolkit.core.designsystem.component.LoadingState
 import com.localai.toolkit.core.designsystem.component.StatusChip
 import com.localai.toolkit.core.designsystem.component.StatusTone
 import com.localai.toolkit.core.designsystem.theme.LocalAiTheme
@@ -51,6 +52,7 @@ fun ModelsScreen(
         onQueryChange = viewModel::onQueryChange,
         onDownload = viewModel::onDownload,
         onDelete = viewModel::onDelete,
+        onRetry = viewModel::refresh,
         onNavigateUp = onNavigateUp,
         modifier = modifier,
     )
@@ -62,11 +64,10 @@ internal fun ModelsContent(
     onQueryChange: (String) -> Unit,
     onDownload: (String) -> Unit,
     onDelete: (String) -> Unit,
+    onRetry: () -> Unit,
     onNavigateUp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
-
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -99,8 +100,9 @@ internal fun ModelsContent(
                                 .semantics { heading() },
                         )
                         Text(
-                            text = stringResource(
-                                R.string.models_downloaded_count,
+                            text = pluralStringResource(
+                                R.plurals.models_downloaded_count,
+                                state.downloaded.size,
                                 state.downloaded.size,
                             ),
                             style = MaterialTheme.typography.labelMedium,
@@ -118,6 +120,8 @@ internal fun ModelsContent(
                     state.failure?.let { failure ->
                         ErrorCard(
                             message = stringResource(failure.messageRes()),
+                            actionLabel = stringResource(R.string.action_retry),
+                            onAction = onRetry,
                             modifier = Modifier.padding(bottom = Spacing.M),
                         )
                     }
@@ -134,12 +138,16 @@ internal fun ModelsContent(
                 }
             }
 
+            if (state.isLoading) {
+                item { LoadingState(label = stringResource(R.string.models_loading)) }
+            }
+
             items(state.visibleLanguages, key = { it.code }) { language ->
                 LanguageRow(
                     language = language,
                     downloaded = language.code in state.downloaded,
                     busy = state.busyCode == language.code,
-                    enabled = state.busyCode == null,
+                    enabled = state.busyCode == null && !state.isLoading,
                     onDownload = { onDownload(language.code) },
                     onDelete = { onDelete(language.code) },
                 )
@@ -235,6 +243,7 @@ private fun ModelsPreview() {
             onQueryChange = {},
             onDownload = {},
             onDelete = {},
+            onRetry = {},
             onNavigateUp = {},
         )
     }

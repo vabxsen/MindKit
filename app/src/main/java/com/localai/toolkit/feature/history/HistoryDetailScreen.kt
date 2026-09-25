@@ -22,22 +22,19 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.localai.toolkit.R
 import com.localai.toolkit.core.designsystem.component.EmptyState
+import com.localai.toolkit.core.designsystem.component.LoadingState
+import com.localai.toolkit.core.designsystem.component.ErrorCard
 import com.localai.toolkit.core.designsystem.component.LocalAiTopBar
 import com.localai.toolkit.core.designsystem.theme.Spacing
-import com.localai.toolkit.core.util.copyToClipboard
+import com.localai.toolkit.core.ui.rememberTextActionHandler
 import com.localai.toolkit.core.util.labelRes
-import com.localai.toolkit.core.util.shareText
-import com.localai.toolkit.core.util.shouldShowCopyConfirmation
 import com.localai.toolkit.domain.model.HistoryItem
-import kotlinx.coroutines.launch
 
 @Composable
 fun HistoryDetailScreen(
@@ -45,11 +42,20 @@ fun HistoryDetailScreen(
     modifier: Modifier = Modifier,
     viewModel: HistoryDetailViewModel = hiltViewModel(),
 ) {
-    val item by viewModel.item.collectAsStateWithLifecycle()
-    val context = LocalContext.current
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    HistoryDetailPage(state, onNavigateUp, viewModel::refresh, modifier)
+}
+
+@Composable
+internal fun HistoryDetailPage(
+    state: HistoryDetailUiState,
+    onNavigateUp: () -> Unit,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val item = state.item
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val copiedMessage = stringResource(R.string.copied_to_clipboard)
+    val textActions = rememberTextActionHandler(snackbarHostState)
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -64,19 +70,14 @@ fun HistoryDetailScreen(
                     val current = item
                     if (current != null) {
                         IconButton(
-                            onClick = {
-                                context.copyToClipboard(current.title, current.output)
-                                if (shouldShowCopyConfirmation()) {
-                                    scope.launch { snackbarHostState.showSnackbar(copiedMessage) }
-                                }
-                            },
+                            onClick = { textActions.copy(current.title, current.output) },
                         ) {
                             Icon(
                                 Icons.Outlined.ContentCopy,
                                 contentDescription = stringResource(R.string.action_copy),
                             )
                         }
-                        IconButton(onClick = { context.shareText(current.output) }) {
+                        IconButton(onClick = { textActions.share(current.output) }) {
                             Icon(
                                 Icons.Outlined.Share,
                                 contentDescription = stringResource(R.string.action_share),
@@ -88,7 +89,16 @@ fun HistoryDetailScreen(
         },
     ) { padding ->
         val current = item
-        if (current == null) {
+        if (state.isLoading) {
+            LoadingState(label = stringResource(R.string.history_loading), modifier = Modifier.padding(padding))
+        } else if (state.loadFailed) {
+            ErrorCard(
+                message = stringResource(R.string.history_load_failed),
+                actionLabel = stringResource(R.string.action_retry),
+                onAction = onRetry,
+                modifier = Modifier.padding(padding).padding(Spacing.M),
+            )
+        } else if (current == null) {
             EmptyState(
                 icon = Icons.Outlined.ErrorOutline,
                 title = stringResource(R.string.history_detail_missing),

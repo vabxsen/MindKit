@@ -1,5 +1,7 @@
 package com.localai.toolkit.feature.rewrite
 
+import com.localai.toolkit.feature.common.HistorySaveController
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.localai.toolkit.ai.capability.DeviceAiCapabilityManager
@@ -23,6 +25,7 @@ import com.localai.toolkit.feature.common.GenAiFeatureGate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +46,7 @@ data class RewriteUiState(
      */
     val comparedOriginal: String = "",
     val style: RewriteStyle = RewriteStyle.REPHRASE,
+    val resultStyle: RewriteStyle = RewriteStyle.REPHRASE,
     val isRewriting: Boolean = false,
     val showOriginal: Boolean = false,
     val failure: AiFailure? = null,
@@ -69,6 +73,9 @@ class RewriteViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(RewriteUiState())
     val uiState: StateFlow<RewriteUiState> = _uiState.asStateFlow()
 
+    private val historySave = HistorySaveController(historyRepository, viewModelScope)
+    val saveFeedback = historySave.feedback
+
     val verboseErrors: StateFlow<Boolean> = settingsRepository.settings
         .map { it.verboseErrors }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
@@ -82,11 +89,15 @@ class RewriteViewModel @Inject constructor(
     }
 
     fun onInputChange(value: String) {
-        _uiState.value = _uiState.value.copy(input = value, savedToHistory = false)
+        if (_uiState.value.input == value) return
+        job?.cancel()
+        _uiState.value = _uiState.value.copy(input = value, isRewriting = false, failure = null)
     }
 
     fun onStyleChange(style: RewriteStyle) {
-        _uiState.value = _uiState.value.copy(style = style)
+        if (_uiState.value.style == style) return
+        job?.cancel()
+        _uiState.value = _uiState.value.copy(style = style, isRewriting = false, failure = null)
     }
 
     fun onToggleComparison() {
@@ -98,17 +109,19 @@ class RewriteViewModel @Inject constructor(
         if (!state.canRewrite) return
 
         job?.cancel()
-        _uiState.value = state.copy(isRewriting = true, failure = null, savedToHistory = false)
+        _uiState.value = state.copy(isRewriting = true, rewritten = "", failure = null, savedToHistory = false)
 
         job = viewModelScope.launch {
             try {
                 val result = engine.rewrite(
                     RewriteRequest(text = state.input, style = state.style),
                 )
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 _uiState.value = _uiState.value.copy(
                     isRewriting = false,
                     rewritten = result,
                     comparedOriginal = state.input,
+                    resultStyle = state.style,
                 )
             } catch (e: AiException) {
                 _uiState.value = _uiState.value.copy(isRewriting = false, failure = e.failure)
@@ -129,19 +142,23 @@ class RewriteViewModel @Inject constructor(
 
     fun onSave() {
         val state = _uiState.value
-        if (!state.hasResult) return
-        viewModelScope.launch {
-            val saved = historyRepository.save(
-                HistoryItem(
-                    type = HistoryType.REWRITE,
-                    title = titleOf(state.comparedOriginal),
-                    inputPreview = previewOf(state.comparedOriginal),
-                    output = state.rewritten,
-                    createdAtEpochMillis = System.currentTimeMillis(),
-                    metadata = state.style.name,
-                ),
-            )
-            _uiState.value = _uiState.value.copy(savedToHistory = saved != null)
+        if (!state.hasResult || state.isRewriting || state.savedToHistory) return
+        historySave.save(
+            item = HistoryItem(
+                type = HistoryType.REWRITE,
+                title = titleOf(state.comparedOriginal),
+                inputPreview = previewOf(state.comparedOriginal),
+                output = state.rewritten,
+                createdAtEpochMillis = System.currentTimeMillis(),
+                metadata = state.resultStyle.name,
+            ),
+            isCurrent = {
+                _uiState.value.rewritten == state.rewritten &&
+                    _uiState.value.comparedOriginal == state.comparedOriginal &&
+                    _uiState.value.resultStyle == state.resultStyle && !_uiState.value.isRewriting
+            },
+        ) { saved ->
+            _uiState.value = _uiState.value.copy(savedToHistory = saved)
         }
     }
 
@@ -163,6 +180,5 @@ class RewriteViewModel @Inject constructor(
     override fun onCleared() {
         job?.cancel()
         gate.release()
-        super.onCleared()
     }
 }

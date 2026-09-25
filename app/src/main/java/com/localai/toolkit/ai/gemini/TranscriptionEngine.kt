@@ -1,37 +1,35 @@
 package com.localai.toolkit.ai.gemini
 
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.os.Build
-import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import com.google.mlkit.genai.common.audio.AudioSource
-import com.google.mlkit.genai.speechrecognition.SpeechRecognizerOptions
-import com.google.mlkit.genai.speechrecognition.SpeechRecognizerResponse
-import com.google.mlkit.genai.speechrecognition.speechRecognizerRequest
 import com.localai.toolkit.ai.engine.ModelDownloadState
+import com.localai.toolkit.ai.audio.PcmAudioInput
 import com.localai.toolkit.di.IoDispatcher
 import com.localai.toolkit.domain.model.AiCapabilityStatus
 import com.localai.toolkit.domain.model.AiException
 import com.localai.toolkit.domain.model.AiFailure
 import com.localai.toolkit.domain.model.AiProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.job
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.withContext
 
 /**
@@ -116,18 +114,25 @@ interface TranscriptionEngine {
 @Singleton
 class DefaultTranscriptionEngine @Inject constructor(
     @param:ApplicationContext private val context: Context,
-    private val clients: GenAiClientProvider,
+    private val clients: SpeechClientFactory,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val pcmAudioInput: PcmAudioInput,
+    private val platformInput: PlatformSpeechInput,
 ) : TranscriptionEngine {
+
+    private class RecognitionSession(val job: Job) {
+        @Volatile var stopAction: (suspend () -> Unit)? = null
+    }
+
+    private val activeRecognition = AtomicReference<RecognitionSession?>()
 
     /** Whether the platform offers a recogniser that is guaranteed to stay on-device. */
     private val platformOnDeviceAvailable: Boolean
         get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
 
-    private var platformRecognizer: SpeechRecognizer? = null
-
     override suspend fun status(mode: TranscriptionMode): AiCapabilityStatus {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return AiCapabilityStatus.UNSUPPORTED
         val mlKit = mlKitStatus(mode)
         if (mlKit != AiCapabilityStatus.UNSUPPORTED && mlKit != AiCapabilityStatus.ERROR) {
             return mlKit
@@ -141,6 +146,7 @@ class DefaultTranscriptionEngine @Inject constructor(
     }
 
     override suspend fun provider(mode: TranscriptionMode): AiProvider {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return AiProvider.NONE
         val mlKit = mlKitStatus(mode)
         return when {
             mlKit == AiCapabilityStatus.AVAILABLE ||
@@ -157,49 +163,86 @@ class DefaultTranscriptionEngine @Inject constructor(
     override suspend fun supportsFileInput(mode: TranscriptionMode): Boolean =
         // Only ML Kit can be handed a file descriptor; the platform recogniser listens to
         // the microphone and nothing else.
-        mlKitStatus(mode) == AiCapabilityStatus.AVAILABLE
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            mlKitStatus(mode) == AiCapabilityStatus.AVAILABLE
 
-    override fun downloadModel(mode: TranscriptionMode): Flow<ModelDownloadState> =
-        clients.speechRecognizer(mode.toMlKitMode()).download()
-            .map { it.toDownloadState() }
-            .catch { throwable -> emit(ModelDownloadState.Failed(throwable.toAiFailure())) }
-            .flowOn(ioDispatcher)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun downloadModel(mode: TranscriptionMode): Flow<ModelDownloadState> = flow {
+        requireSpeechSdk()
+        // Creation is cold, and only this download owns/closes this client.
+        clients.create(mode).use { client ->
+            emitAll(client.download().transformWhile { state ->
+                emit(state)
+                state != ModelDownloadState.Completed && state !is ModelDownloadState.Failed
+            })
+        }
+    }.flowOn(ioDispatcher).catch { error ->
+        if (error is CancellationException) throw error
+        emit(ModelDownloadState.Failed((error as? AiException)?.failure ?: error.toAiFailure()))
+    }
 
-    override fun transcribeMicrophone(mode: TranscriptionMode): Flow<TranscriptChunk> = flow {
-        if (mlKitStatus(mode) == AiCapabilityStatus.AVAILABLE) {
-            emitAll(mlKitRecognize(mode) { AudioSource.fromMic() })
+    override fun transcribeMicrophone(mode: TranscriptionMode): Flow<TranscriptChunk> = recognitionFlow { session ->
+        // Keep this guard local so lint can verify the SDK's API-31 microphone call.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            throw AiException(AiFailure.Unsupported("On-device speech requires Android 12 or newer"))
+        }
+        val status = mlKitStatus(mode)
+        if (status == AiCapabilityStatus.AVAILABLE) {
+            emitAll(mlKitRecognize(session, mode) { AudioSource.fromMic() })
+        } else if (mode == TranscriptionMode.BASIC &&
+            (status == AiCapabilityStatus.UNSUPPORTED || status == AiCapabilityStatus.ERROR) &&
+            platformOnDeviceAvailable
+        ) {
+            session.stopAction = {
+                withContext(Dispatchers.Main) {
+                    if (activeRecognition.get() === session) platformInput.stop()
+                }
+            }
+            emitAll(platformInput.recognize())
         } else {
-            emitAll(platformRecognize())
+            throw AiException(when (status) {
+                AiCapabilityStatus.UNSUPPORTED -> AiFailure.Unsupported("Requested speech mode is unavailable")
+                AiCapabilityStatus.DOWNLOADABLE, AiCapabilityStatus.DOWNLOADING -> AiFailure.ModelNotDownloaded()
+                else -> AiFailure.Unknown("Unable to establish speech availability")
+            })
         }
     }
 
     override fun transcribeFile(uri: Uri, mode: TranscriptionMode): Flow<TranscriptChunk> =
-        mlKitRecognize(mode) {
-            val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
-                ?: throw AiException(AiFailure.InvalidInput(tooLarge = false))
-            // ONE_SHOT: the whole file is available up front, unlike a live microphone.
-            AudioSource.fromPfd(descriptor, AudioSource.Mode.ONE_SHOT)
+        recognitionFlow { session ->
+            emitAll(pcmAudioInput.recognize(uri) { descriptor ->
+                mlKitRecognize(session, mode) {
+                    // Encoded/container bytes are decoded locally into a paced PCM stream.
+                    AudioSource.fromPfd(descriptor, AudioSource.Mode.STREAMING)
+                }
+            })
         }
 
     override suspend fun stop() {
-        withContext(ioDispatcher) { runCatching { clients.stopSpeechRecognition() } }
-        // The platform recogniser must be driven from the main thread.
-        withContext(Dispatchers.Main) { runCatching { platformRecognizer?.stopListening() } }
+        withContext(ioDispatcher) {
+            val session = activeRecognition.get() ?: return@withContext
+            val stop = session.stopAction
+            // Stop during setup means no utterance exists yet; cancel that setup.
+            if (stop == null) session.job.cancel() else stop()
+        }
     }
 
     override fun release() {
-        clients.closeSpeechRecognizers()
-        platformRecognizer?.destroy()
-        platformRecognizer = null
+        // The owning collection closes its client in finally. Do not touch independent
+        // downloads/status checks or close a client concurrently with its setup.
+        activeRecognition.get()?.job?.cancel()
+        platformInput.release()
     }
 
     private suspend fun mlKitStatus(mode: TranscriptionMode): AiCapabilityStatus =
         withContext(ioDispatcher) {
             try {
-                clients.speechRecognizer(mode.toMlKitMode()).checkStatus().toCapabilityStatus()
+                clients.create(mode).use { it.status() }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 // No AICore, or no speech feature at all.
-                if (e.toAiFailure() is AiFailure.Unsupported) {
+                if (((e as? AiException)?.failure ?: e.toAiFailure()) is AiFailure.Unsupported) {
                     AiCapabilityStatus.UNSUPPORTED
                 } else {
                     AiCapabilityStatus.ERROR
@@ -207,119 +250,42 @@ class DefaultTranscriptionEngine @Inject constructor(
             }
         }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     private fun mlKitRecognize(
+        session: RecognitionSession,
         mode: TranscriptionMode,
         audioSource: () -> AudioSource,
     ): Flow<TranscriptChunk> = flow {
-        val recognizer = clients.speechRecognizer(mode.toMlKitMode())
-        val request = speechRecognizerRequest { this.audioSource = audioSource() }
-
-        recognizer.startRecognition(request).collect { response ->
-            when (response) {
-                is SpeechRecognizerResponse.PartialTextResponse ->
-                    emit(TranscriptChunk.Partial(response.text))
-
-                is SpeechRecognizerResponse.FinalTextResponse ->
-                    emit(TranscriptChunk.Final(response.text))
-
-                is SpeechRecognizerResponse.CompletedResponse ->
-                    emit(TranscriptChunk.Completed)
-
-                // Errors arrive in-band rather than as a throw, so they are re-thrown to
-                // take the same mapped path as every other failure.
-                is SpeechRecognizerResponse.ErrorResponse ->
-                    throw AiException(response.e.toAiFailure(), response.e)
-            }
+        clients.create(mode).use { recognizer ->
+            session.stopAction = { recognizer.stop() }
+            emitAll(recognizer.recognize(audioSource()).transformWhile { chunk ->
+                emit(chunk)
+                chunk != TranscriptChunk.Completed
+            })
         }
     }
-        .flowOn(ioDispatcher)
-        .catch { throwable ->
-            if (throwable is AiException) throw throwable
-            throw AiException(throwable.toAiFailure(), throwable)
-        }
 
-    /**
-     * The platform on-device recogniser, as a Flow.
-     *
-     * [SpeechRecognizer] must be created and driven on the main thread, which is why this
-     * flow is pinned to [Dispatchers.Main] rather than the IO dispatcher used elsewhere.
-     */
-    private fun platformRecognize(): Flow<TranscriptChunk> = callbackFlow {
-        if (!platformOnDeviceAvailable) {
-            throw AiException(
-                AiFailure.Unsupported("No on-device platform speech recogniser"),
-            )
-        }
-
-        val recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-        platformRecognizer = recognizer
-
-        recognizer.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) = Unit
-            override fun onBeginningOfSpeech() = Unit
-            override fun onRmsChanged(rmsdB: Float) = Unit
-            override fun onBufferReceived(buffer: ByteArray?) = Unit
-            override fun onEndOfSpeech() = Unit
-            override fun onEvent(eventType: Int, params: Bundle?) = Unit
-
-            override fun onPartialResults(partialResults: Bundle?) {
-                partialResults
-                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let { trySend(TranscriptChunk.Partial(it)) }
+    private fun recognitionFlow(
+        block: suspend FlowCollector<TranscriptChunk>.(RecognitionSession) -> Unit,
+    ): Flow<TranscriptChunk> = flow {
+        requireSpeechSdk()
+        coroutineScope {
+            val session = RecognitionSession(coroutineContext.job)
+            if (!activeRecognition.compareAndSet(null, session)) throw AiException(AiFailure.Busy())
+            try {
+                block(session)
+            } finally {
+                activeRecognition.compareAndSet(session, null)
             }
-
-            override fun onResults(results: Bundle?) {
-                results
-                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let { trySend(TranscriptChunk.Final(it)) }
-                trySend(TranscriptChunk.Completed)
-                channel.close()
-            }
-
-            override fun onError(error: Int) {
-                channel.close(AiException(platformErrorToFailure(error)))
-            }
-        })
-
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
-            )
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
         }
-        recognizer.startListening(intent)
-
-        awaitClose {
-            recognizer.stopListening()
-            recognizer.destroy()
-            platformRecognizer = null
-        }
-    }.flowOn(Dispatchers.Main)
-
-    private fun TranscriptionMode.toMlKitMode(): Int = when (this) {
-        TranscriptionMode.BASIC -> SpeechRecognizerOptions.Mode.MODE_BASIC
-        TranscriptionMode.ADVANCED -> SpeechRecognizerOptions.Mode.MODE_ADVANCED
+    }.flowOn(ioDispatcher).catch { error ->
+        if (error is CancellationException || error is AiException) throw error
+        throw AiException(error.toAiFailure(), error)
     }
-}
 
-/** Platform recogniser error codes, mapped into the app's failure vocabulary. */
-private fun platformErrorToFailure(error: Int): AiFailure = when (error) {
-    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
-        AiFailure.Unsupported("RECORD_AUDIO not granted")
-
-    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> AiFailure.Busy()
-
-    SpeechRecognizer.ERROR_NO_MATCH,
-    SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
-    -> AiFailure.InvalidInput(tooLarge = false, technicalDetail = "No speech detected")
-
-    SpeechRecognizer.ERROR_CLIENT -> AiFailure.Cancelled("Recogniser client error")
-
-    else -> AiFailure.Unknown("SpeechRecognizer error=$error")
+    private fun requireSpeechSdk() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            throw AiException(AiFailure.Unsupported("On-device speech requires Android 12 or newer"))
+        }
+    }
 }

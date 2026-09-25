@@ -57,6 +57,29 @@ class DevToolsTest {
 
     // ---- URL ---------------------------------------------------------------------
 
+    @Test fun `base64 rejects garbage rather than silently ignoring punctuation`() {
+        assertThat(DevTools.base64Decode("!!!")).isNull()
+        assertThat(DevTools.base64Decode("aGk=!!!")).isNull()
+        assertThat(DevTools.base64Decode("/w==")).isNull() // not UTF-8 text
+        assertThat(DevTools.base64Decode("aG\nk=")).isEqualTo("hi")
+        assertThat(DevTools.base64Decode("aGk")).isEqualTo("hi")
+    }
+
+    @Test fun `extreme dates never overflow or crash conversion`() {
+        assertThat(DevTools.parseEpoch(Long.MIN_VALUE.toString())?.epochMillis).isEqualTo(Long.MIN_VALUE)
+        assertThat(DevTools.parseIso8601("+999999999-12-31T23:59:59Z")).isNull()
+    }
+
+    @Test fun `jwt with out of range expiry still exposes the raw payload without crashing`() {
+        val decoded = DevTools.decodeJwt(jwt("{}", """{"exp":9223372036854775807}"""))!!
+        assertThat(decoded.expiresAt).isNull()
+        assertThat(decoded.payload).contains("9223372036854775807")
+    }
+
+    @Test fun `jwt with extra segments is not silently truncated`() {
+        assertThat(DevTools.decodeJwt(jwt("{}", "{}") + ".extra")).isNull()
+    }
+
     @Test
     fun `url encoding uses percent-encoded spaces rather than plus`() {
         // URLEncoder is form encoding; a developer inspecting a URL expects %20.

@@ -2,6 +2,7 @@ package com.localai.toolkit.feature.share
 
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.localai.toolkit.R
 import com.localai.toolkit.core.navigation.HandoffPayload
 import com.localai.toolkit.core.navigation.ToolHandoff
@@ -9,9 +10,9 @@ import com.localai.toolkit.core.util.previewOf
 import com.localai.toolkit.domain.model.ToolId
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 
 data class ShareRouterUiState(
     @param:StringRes val kindLabelRes: Int = R.string.share_kind_text,
@@ -25,50 +26,44 @@ class ShareRouterViewModel @Inject constructor(
     private val toolHandoff: ToolHandoff,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ShareRouterUiState())
-    val uiState: StateFlow<ShareRouterUiState> = _uiState.asStateFlow()
+    // A second share can arrive while this same router is still visible.
+    val uiState = shareStore.pending.map(::stateFor)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, stateFor(shareStore.pending.value))
 
-    /**
-     * The share is read but not consumed here.
-     *
-     * Consuming on entry would lose the content across a configuration change; it is
-     * consumed in [route], at the moment it is handed to a tool.
-     */
-    private val content: SharedContent? = shareStore.pending.value
+    private fun stateFor(current: SharedContent?): ShareRouterUiState = when (current) {
+        is SharedContent.Text -> ShareRouterUiState(
+            kindLabelRes = R.string.share_kind_text,
+            previewText = previewOf(current.value, maxChars = 400),
+            actions = TEXT_ACTIONS,
+        )
 
-    init {
-        _uiState.value = when (val current = content) {
-            is SharedContent.Text -> ShareRouterUiState(
-                kindLabelRes = R.string.share_kind_text,
-                previewText = previewOf(current.value, maxChars = 400),
-                actions = TEXT_ACTIONS,
-            )
+        is SharedContent.Image -> ShareRouterUiState(
+            kindLabelRes = R.string.share_kind_image,
+            previewText = "",
+            actions = IMAGE_ACTIONS,
+        )
 
-            is SharedContent.Image -> ShareRouterUiState(
-                kindLabelRes = R.string.share_kind_image,
-                previewText = "",
-                actions = IMAGE_ACTIONS,
-            )
+        is SharedContent.Audio -> ShareRouterUiState(
+            kindLabelRes = R.string.share_kind_audio,
+            previewText = "",
+            actions = AUDIO_ACTIONS,
+        )
 
-            is SharedContent.Audio -> ShareRouterUiState(
-                kindLabelRes = R.string.share_kind_audio,
-                previewText = "",
-                actions = AUDIO_ACTIONS,
-            )
-
-            null -> ShareRouterUiState(actions = emptyList())
-        }
+        null -> ShareRouterUiState(actions = emptyList())
     }
 
     /** Hands the shared content to [tool] and clears it from the store. */
-    fun route(tool: ToolId) {
-        val payload = when (val current = shareStore.consume() ?: content) {
+    fun route(tool: ToolId): Boolean {
+        val current = shareStore.pending.value ?: return false
+        if (tool !in stateFor(current).actions) return false
+        val payload = when (current) {
             is SharedContent.Text -> HandoffPayload(target = tool, text = current.value)
             is SharedContent.Image -> HandoffPayload(target = tool, imageUri = current.uri)
             is SharedContent.Audio -> HandoffPayload(target = tool, audioUri = current.uri)
-            null -> return
         }
+        shareStore.consume()
         toolHandoff.send(payload)
+        return true
     }
 
     fun cancel() {

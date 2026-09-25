@@ -1,5 +1,10 @@
 package com.localai.toolkit.feature.image
 
+import com.localai.toolkit.feature.common.HistorySaveFeedback
+import com.localai.toolkit.feature.common.ObserveHistorySaveFeedback
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -32,7 +37,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -57,15 +61,12 @@ import com.localai.toolkit.core.designsystem.theme.Spacing
 import com.localai.toolkit.core.ui.messageRes
 import com.localai.toolkit.core.ui.offersRetry
 import com.localai.toolkit.core.ui.technicalDetailOrNull
-import com.localai.toolkit.core.util.copyToClipboard
-import com.localai.toolkit.core.util.shareText
-import com.localai.toolkit.core.util.shouldShowCopyConfirmation
+import com.localai.toolkit.core.ui.rememberTextActionHandler
 import com.localai.toolkit.domain.model.AiCapability
 import com.localai.toolkit.domain.model.AiTask
 import com.localai.toolkit.domain.model.ToolId
 import com.localai.toolkit.feature.common.GenAiGate
 import com.localai.toolkit.feature.common.gateStateOf
-import kotlinx.coroutines.launch
 
 /** Ready-made questions, so the tool is useful without the user inventing a prompt. */
 private val suggestedPrompts = listOf(
@@ -95,10 +96,12 @@ fun ImageScreen(
         capability = if (state.mode == ImageMode.DESCRIBE) describeCapability else askCapability,
         downloadState = if (state.mode == ImageMode.DESCRIBE) describeDownload else askDownload,
         verboseErrors = verboseErrors,
+        saveFeedback = viewModel.saveFeedback,
         onImageSelected = viewModel::onImageSelected,
         onModeChange = viewModel::onModeChange,
         onQuestionChange = viewModel::onQuestionChange,
         onRun = viewModel::onRun,
+        onStop = viewModel::onStop,
         onSave = viewModel::onSave,
         onClear = viewModel::onClear,
         onDownload = viewModel::onDownloadModel,
@@ -126,6 +129,7 @@ internal fun ImageContent(
     onModeChange: (ImageMode) -> Unit,
     onQuestionChange: (String) -> Unit,
     onRun: () -> Unit,
+    onStop: () -> Unit,
     onSave: () -> Unit,
     onClear: () -> Unit,
     onDownload: () -> Unit,
@@ -134,11 +138,12 @@ internal fun ImageContent(
     onSendTextTo: (ToolId) -> Unit,
     onNavigateUp: () -> Unit,
     modifier: Modifier = Modifier,
+    saveFeedback: Flow<HistorySaveFeedback> = emptyFlow(),
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val copiedMessage = stringResource(R.string.copied_to_clipboard)
+    ObserveHistorySaveFeedback(saveFeedback, snackbarHostState)
+    val textActions = rememberTextActionHandler(snackbarHostState)
 
     val pickImage = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
@@ -188,7 +193,12 @@ internal fun ImageContent(
                 contentDescription = stringResource(R.string.image_local_note),
             )
 
-            if (state.preview == null) {
+            if (state.isLoadingImage) {
+                LoadingState(label = stringResource(R.string.image_loading))
+                OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            } else if (state.preview == null) {
                 EmptyState(
                     icon = Icons.Outlined.Image,
                     title = stringResource(R.string.image_empty_title),
@@ -256,6 +266,12 @@ internal fun ImageContent(
                             )
                         }
 
+                        if (state.isWorking) {
+                            OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) {
+                                Text(stringResource(R.string.action_stop))
+                            }
+                        }
+
                         when {
                             state.isWorking && state.output.isBlank() -> LoadingState(
                                 label = stringResource(R.string.loading_describing_image),
@@ -284,17 +300,11 @@ internal fun ImageContent(
                                         R.string.image_answer_label
                                     },
                                 ),
-                                onCopy = {
-                                    context.copyToClipboard("image", state.output)
-                                    if (shouldShowCopyConfirmation()) {
-                                        scope.launch {
-                                            snackbarHostState.showSnackbar(copiedMessage)
-                                        }
-                                    }
-                                },
-                                onShare = { context.shareText(state.output) },
+                                onCopy = { textActions.copy("image", state.output) },
+                                onShare = { textActions.share(state.output) },
                                 onSave = onSave,
                                 saved = state.savedToHistory,
+                                saveEnabled = !state.isWorking,
                                 secondaryActions = listOf(
                                     ResultAction(stringResource(R.string.tool_summarize_title)) {
                                         onSendTextTo(ToolId.SUMMARIZE)
@@ -348,6 +358,7 @@ private fun ImageEmptyPreview() {
             onModeChange = {},
             onQuestionChange = {},
             onRun = {},
+            onStop = {},
             onSave = {},
             onClear = {},
             onDownload = {},

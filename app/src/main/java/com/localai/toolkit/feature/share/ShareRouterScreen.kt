@@ -1,5 +1,7 @@
 package com.localai.toolkit.feature.share
 
+import androidx.activity.compose.BackHandler
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -53,17 +55,18 @@ fun ShareRouterScreen(
     viewModel: ShareRouterViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val cancel = {
+        viewModel.cancel()
+        onCancel()
+    }
+    BackHandler(onBack = cancel)
 
     ShareRouterContent(
         state = state,
         onSelect = { tool ->
-            viewModel.route(tool)
-            onOpenTool(tool)
+            if (viewModel.route(tool)) onOpenTool(tool)
         },
-        onCancel = {
-            viewModel.cancel()
-            onCancel()
-        },
+        onCancel = cancel,
         modifier = modifier,
     )
 }

@@ -6,6 +6,18 @@
   placeholders use positional arguments so translators can reorder them.
 -->
 <resources>
+    <string name="dev_input_too_large">This tool supports up to 100,000 characters. Shorten the input and try again.</string>
+    <string name="settings_loading">Loading your workspace…</string>
+    <string name="settings_load_failed">Couldn’t read your preferences. History saving is paused until they can be read. Please retry.</string>
+    <string name="onboarding_finish_failed">Couldn’t save your setup. Please try again.</string>
+    <string name="settings_history_cleared">History cleared</string>
+    <string name="settings_save_failed">Couldn’t save this setting. Please try again.</string>
+    <string name="history_delete_failed">Couldn’t delete history. Please try again.</string>
+    <string name="history_loading">Loading history…</string>
+    <string name="history_load_failed">Couldn’t load history. Please try again.</string>
+    <string name="settings_clear_data_failed">Couldn’t finish clearing local data. Some data may already be removed. Please try again.</string>
+    <string name="image_loading">Loading image…</string>
+    <string name="action_check_status">Check status</string>
 
     <!-- App identity. Replace app_name to rebrand; nothing references the literal. -->
     <string name="app_name">MindKit</string>
@@ -27,33 +39,24 @@
     <string name="action_cancel">Cancel</string>
     <string name="action_delete">Delete</string>
     <string name="action_delete_all">Delete all</string>
-    <string name="action_back">Back</string>
     <string name="action_close">Close</string>
-    <string name="action_done">Done</string>
     <string name="action_continue">Continue</string>
     <string name="action_skip">Skip</string>
     <string name="action_stop">Stop</string>
     <string name="action_send">Send</string>
-    <string name="action_apply">Apply</string>
     <string name="action_download_model">Download model</string>
-    <string name="action_open">Open</string>
-    <string name="action_more">More options</string>
-    <string name="action_paste">Paste</string>
     <string name="action_swap">Swap languages</string>
     <string name="action_choose_photo">Choose a photo</string>
-    <string name="action_take_photo">Take a photo</string>
     <string name="action_choose_audio">Choose an audio file</string>
     <string name="action_record">Record</string>
-    <string name="action_learn_more">Learn more</string>
-    <string name="action_refresh">Refresh</string>
 
     <string name="copied_to_clipboard">Copied</string>
     <string name="saved_to_history">Saved to history</string>
     <string name="history_disabled_not_saved">History is turned off, so this was not saved</string>
+    <string name="history_save_failed">Couldn’t save this result. Please try again.</string>
+    <string name="models_loading">Checking downloaded languages…</string>
 
     <!-- Home -->
-    <string name="home_title">MindKit</string>
-    <string name="home_tools_header">Tools</string>
     <string name="home_field_notes_tagline">Offline tools for clearer work</string>
     <string name="home_workspace_title">Your private workspace</string>
     <string name="home_workspace_body">Everything happens on this device.</string>
@@ -65,7 +68,6 @@
     <string name="home_start_with">Start with</string>
     <string name="home_recent">Recent</string>
     <string name="home_recent_empty">Saved work will appear here</string>
-    <string name="home_device_section">Device</string>
     <string name="home_models_ready">Models ready</string>
     <string name="home_models_checking">Checking local models</string>
     <string name="history_subtitle">Everything you save stays on this device.</string>
@@ -119,11 +121,9 @@
 
     <!-- Loading phases. Each names the work so no spinner is unexplained. -->
     <string name="loading_checking_availability">Checking AI availability…</string>
-    <string name="loading_preparing_model">Preparing model…</string>
     <string name="loading_downloading_model">Downloading model…</string>
     <string name="loading_downloading_model_percent">Downloading model %1$d%%</string>
     <string name="loading_analyzing">Analyzing locally…</string>
-    <string name="loading_generating">Generating…</string>
     <string name="loading_transcribing">Transcribing…</string>
     <string name="loading_extracting_text">Extracting text…</string>
     <string name="loading_translating">Translating…</string>
@@ -147,8 +147,6 @@
     <string name="error_cancelled">Cancelled.</string>
     <string name="error_unknown">Something went wrong. Please try again.</string>
     <string name="error_no_text_detected">No text was detected in this image.</string>
-    <string name="error_file_open_failed">The selected file couldn\'t be opened.</string>
-    <string name="error_empty_input">Enter some text first.</string>
     <string name="error_technical_detail">Technical detail: %1$s</string>
 
     <!-- Onboarding -->
@@ -170,10 +168,8 @@
     <string name="history_empty_body">Your locally processed results will appear here.</string>
     <string name="history_no_matches_title">No matching results</string>
     <string name="history_no_matches_body">Try a different search or clear the filters.</string>
-    <string name="history_filter_all">All</string>
     <string name="history_delete_all_title">Delete all history?</string>
     <string name="history_delete_all_body">This permanently removes every locally stored result. It can\'t be undone.</string>
-    <string name="history_item_deleted">Deleted</string>
     <string name="history_type_ask">Ask AI</string>
     <string name="history_type_summary">Summary</string>
     <string name="history_type_rewrite">Rewrite</string>
@@ -218,7 +214,9 @@
     <string name="settings_version">App version</string>
     <string name="settings_licenses">Open source licenses</string>
     <string name="settings_device_info">Device capability information</string>
-    <string name="about_licenses_summary">Opens the terms for the on-device ML components this app uses</string>
+    <string name="about_licenses_summary">View notices for the libraries included in MindKit</string>
+    <string name="settings_about_app">About MindKit</string>
+    <string name="licenses_open_failed">Could not open licenses. Please try again.</string>
     <string name="about_offline_note">MindKit needs no account and no server. A network connection is only used when you ask Android to download an on-device model.</string>
 
     <string name="settings_section_developer">Developer</string>
@@ -252,9 +250,6 @@
     <string name="device_ai_model">Model</string>
     <string name="device_ai_capabilities">Capabilities</string>
     <string name="device_ai_unknown_model">Not reported</string>
-    <string name="device_ai_available">Available</string>
-    <string name="device_ai_unavailable">Unavailable</string>
-    <string name="device_ai_last_checked">Last checked %1$s</string>
     <string name="device_ai_refresh">Re-check device</string>
     <string name="device_ai_task_ask">Ask AI</string>
     <string name="device_ai_task_summarize">Summarization</string>
@@ -266,10 +261,6 @@
     <string name="device_ai_task_basic_transcription">Basic transcription</string>
     <string name="device_ai_task_text_recognition">Text recognition (OCR)</string>
     <string name="device_ai_task_translation">Offline translation</string>
-    <string name="device_ai_download_state_not_downloaded">Not downloaded</string>
-    <string name="device_ai_download_state_downloading">Downloading %1$d%%</string>
-    <string name="device_ai_download_state_ready">Ready</string>
-    <string name="device_ai_download_state_failed">Failed</string>
     <string name="device_ai_explanation">Gemini Nano availability depends on your device model, its system version, AICore, and which feature models have been installed. These results come from runtime checks on this device.</string>
 
     <!-- Shared availability gate -->
@@ -284,9 +275,6 @@
     <string name="ask_empty_title">Ask something.</string>
     <string name="ask_empty_body">Answers are generated by the model on your device.</string>
     <string name="ask_new_conversation">New conversation</string>
-    <string name="ask_clear_conversation">Clear conversation</string>
-    <string name="ask_you">You</string>
-    <string name="ask_assistant">MindKit</string>
     <string name="ask_info_title">Where does this run?</string>
     <string name="ask_info_body">Prompts and answers are processed by Gemini Nano on this device. Your conversation is not uploaded by this app, and it is not kept after you clear it unless you save a result to history.</string>
     <string name="ask_stop">Stop generating</string>
@@ -303,7 +291,10 @@
     <string name="summarize_length_explainer">The on-device model summarizes into bullet points: Short is one bullet, Medium two, Detailed three.</string>
     <string name="summarize_action">Summarize</string>
     <string name="summarize_result_label">Summary</string>
-    <string name="summarize_char_count">%1$d characters</string>
+    <plurals name="summarize_char_count">
+        <item quantity="one">%1$d character</item>
+        <item quantity="other">%1$d characters</item>
+    </plurals>
 
     <!-- Rewrite -->
     <string name="rewrite_input_hint">Text to rewrite</string>
@@ -451,20 +442,15 @@
     <!-- Translate -->
     <string name="translate_source">From</string>
     <string name="translate_target">To</string>
-    <string name="translate_detect">Detect language</string>
     <string name="translate_detected">Detected: %1$s</string>
     <string name="translate_input_hint">Enter text to translate</string>
     <string name="translate_action">Translate</string>
     <string name="translate_result_label">Translation</string>
-    <string name="translate_empty_title">Translate without a connection.</string>
-    <string name="translate_empty_body">Download a language once and it keeps working offline.</string>
-    <string name="translate_model_needed_title">Language pack needed</string>
     <string name="translate_model_needed_body">%1$s has to be downloaded before it can be used offline.</string>
     <string name="translate_download_language">Download %1$s</string>
     <string name="translate_downloading_language">Downloading %1$s…</string>
     <string name="translate_pick_language">Select a language</string>
     <string name="translate_same_language">Pick two different languages.</string>
-    <string name="translate_wifi_only">Download over Wi-Fi only</string>
 
     <!-- Models -->
     <string name="models_title">Models</string>
@@ -475,13 +461,20 @@
     <string name="models_delete">Delete</string>
     <string name="models_search_hint">Search languages</string>
     <string name="models_explanation">Language packs are downloaded by Google Play services and stored by the system. Deleting one here removes it from this device.</string>
-    <string name="models_downloaded_count">%1$d downloaded</string>
+    <plurals name="models_downloaded_count">
+        <item quantity="one">%1$d language downloaded</item>
+        <item quantity="other">%1$d languages downloaded</item>
+    </plurals>
     <string name="models_genai_header">On-device AI features</string>
     <string name="models_genai_explanation">Gemini Nano feature models are installed and updated by Android. MindKit can ask for a download but does not manage or delete them.</string>
 
 
     <!-- Accessibility -->
-    <string name="cd_tool_unavailable">%1$s, not supported on this device</string>
     <string name="cd_navigate_up">Navigate up</string>
     <string name="cd_info">More information</string>
+    <string name="translate_language_preferences_failed">Could not load or save your language preferences. You can still translate; retry to remember your selection.</string>
+    <string name="copy_failed">Could not copy this text. Please try again.</string>
+    <string name="share_failed">Could not open the share sheet. Please try again.</string>
+    <string name="error_invalid_audio">This audio file could not be read or decoded. Choose another audio file.</string>
+    <string name="transcribe_file_pacing">Files are streamed locally at playback speed. Longer recordings take longer.</string>
 </resources>

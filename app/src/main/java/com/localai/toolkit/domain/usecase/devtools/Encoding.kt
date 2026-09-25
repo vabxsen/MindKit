@@ -2,13 +2,14 @@ package com.localai.toolkit.domain.usecase.devtools
 
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
-import java.time.format.DateTimeParseException
 import java.util.Base64
 import java.util.Locale
 import java.util.UUID
@@ -40,14 +41,12 @@ object DevTools {
      *   screen simple: invalid input is a state, not an exception.
      */
     fun base64Decode(input: String): String? {
-        val trimmed = input.trim()
+        val trimmed = input.filterNot { it.isWhitespace() }
         if (trimmed.isEmpty()) return null
         val bytes = runCatching { Base64.getDecoder().decode(trimmed) }
             .recoverCatching { Base64.getUrlDecoder().decode(trimmed) }
-            // Some encoders drop the '=' padding; mime decoding tolerates that.
-            .recoverCatching { Base64.getMimeDecoder().decode(trimmed) }
             .getOrNull() ?: return null
-        return runCatching { String(bytes, StandardCharsets.UTF_8) }.getOrNull()
+        return decodeUtf8(bytes)
     }
 
     // ---- URL ---------------------------------------------------------------------
@@ -109,21 +108,18 @@ object DevTools {
      */
     fun parseEpoch(input: String, zone: ZoneId = ZoneId.systemDefault()): TimestampResult? {
         val value = input.trim().toLongOrNull() ?: return null
-        val millis = if (kotlin.math.abs(value) > SECONDS_DIGIT_LIMIT) value else value * 1_000
-        val instant = runCatching { Instant.ofEpochMilli(millis) }.getOrNull() ?: return null
-        return instant.toResult(zone)
+        val millis = if (value !in -SECONDS_DIGIT_LIMIT..SECONDS_DIGIT_LIMIT) value else value * 1_000
+        return runCatching { Instant.ofEpochMilli(millis).toResult(zone) }.getOrNull()
     }
 
     /** Parses an ISO-8601 timestamp such as "2026-09-20T12:00:00Z". */
     fun parseIso8601(input: String, zone: ZoneId = ZoneId.systemDefault()): TimestampResult? {
         val trimmed = input.trim()
         if (trimmed.isEmpty()) return null
-        return try {
-            Instant.parse(trimmed).toResult(zone)
-        } catch (e: DateTimeParseException) {
+        return runCatching { Instant.parse(trimmed).toResult(zone) }
             // Fall back to an offset-bearing form such as "2026-09-20T12:00:00+02:00".
-            runCatching { ZonedDateTime.parse(trimmed).toInstant().toResult(zone) }.getOrNull()
-        }
+            .recoverCatching { ZonedDateTime.parse(trimmed).toInstant().toResult(zone) }
+            .getOrNull()
     }
 
     fun now(zone: ZoneId = ZoneId.systemDefault()): TimestampResult = Instant.now().toResult(zone)
@@ -157,14 +153,14 @@ object DevTools {
      */
     fun decodeJwt(token: String, zone: ZoneId = ZoneId.systemDefault()): DecodedJwt? {
         val parts = token.trim().split(".")
-        if (parts.size < 2) return null
+        if (parts.size !in 2..3) return null
 
         val header = decodeJwtSegment(parts[0]) ?: return null
         val payload = decodeJwtSegment(parts[1]) ?: return null
         val signature = parts.getOrNull(2).orEmpty()
 
         val expiry = extractExpiry(payload)?.let { seconds ->
-            Instant.ofEpochSecond(seconds).toResult(zone)
+            runCatching { Instant.ofEpochSecond(seconds).toResult(zone) }.getOrNull()
         }
 
         return DecodedJwt(
@@ -184,8 +180,15 @@ object DevTools {
         // JWT uses base64url without padding.
         val bytes = runCatching { Base64.getUrlDecoder().decode(segment.padForBase64()) }
             .getOrNull() ?: return null
-        return runCatching { String(bytes, StandardCharsets.UTF_8) }.getOrNull()
+        return decodeUtf8(bytes)
     }
+
+    private fun decodeUtf8(bytes: ByteArray): String? = runCatching {
+        StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(bytes)).toString()
+    }.getOrNull()
 
     private fun String.padForBase64(): String = when (length % 4) {
         2 -> "$this=="

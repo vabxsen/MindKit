@@ -24,6 +24,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalResources
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
@@ -44,23 +48,30 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val isClearing by viewModel.isClearing.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    val historyClearedMessage = stringResource(R.string.settings_clear_history)
-    val dataClearedMessage = stringResource(R.string.settings_clear_data_done)
+    val resources = LocalResources.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
 
-    LaunchedEffect(viewModel) {
-        viewModel.events.collect { event ->
-            val message = when (event) {
-                SettingsEvent.HISTORY_CLEARED -> historyClearedMessage
-                SettingsEvent.DATA_CLEARED -> dataClearedMessage
+    LaunchedEffect(viewModel, resources, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            viewModel.events.collect { event ->
+                val message = when (event) {
+                    SettingsEvent.HISTORY_CLEARED -> R.string.settings_history_cleared
+                    SettingsEvent.DATA_CLEARED -> R.string.settings_clear_data_done
+                    SettingsEvent.SAVE_FAILED -> R.string.settings_save_failed
+                    SettingsEvent.HISTORY_CLEAR_FAILED -> R.string.history_delete_failed
+                    SettingsEvent.DATA_CLEAR_FAILED -> R.string.settings_clear_data_failed
+                }
+                snackbarHostState.showSnackbar(resources.getString(message))
             }
-            snackbarHostState.showSnackbar(message)
         }
     }
 
     SettingsContent(
         settings = settings,
+        isClearing = isClearing,
         dynamicColorSupported = viewModel.dynamicColorSupported,
         snackbarHostState = snackbarHostState,
         onThemeModeChange = viewModel::setThemeMode,
@@ -87,8 +98,11 @@ internal fun SettingsContent(
     onClearAllData: () -> Unit,
     onNavigate: (String) -> Unit,
     modifier: Modifier = Modifier,
+    isClearing: Boolean = false,
 ) {
     var showClearDataDialog by remember { mutableStateOf(false) }
+    var showClearHistoryDialog by remember { mutableStateOf(false) }
+    val openLicenses = licenseLauncher(snackbarHostState)
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -141,6 +155,7 @@ internal fun SettingsContent(
                         ThemeMode.entries.forEach { mode ->
                             FilterChip(
                                 selected = settings.themeMode == mode,
+                                enabled = !isClearing,
                                 onClick = { onThemeModeChange(mode) },
                                 label = { Text(stringResource(mode.labelRes())) },
                             )
@@ -154,7 +169,7 @@ internal fun SettingsContent(
                             stringResource(R.string.settings_dynamic_color_unsupported)
                         },
                         checked = settings.dynamicColor && dynamicColorSupported,
-                        enabled = dynamicColorSupported,
+                        enabled = dynamicColorSupported && !isClearing,
                         onCheckedChange = onDynamicColorChange,
                     )
                 }
@@ -181,17 +196,20 @@ internal fun SettingsContent(
                         title = stringResource(R.string.settings_save_history),
                         summary = stringResource(R.string.settings_save_history_summary),
                         checked = settings.saveHistory,
+                        enabled = !isClearing,
                         onCheckedChange = onSaveHistoryChange,
                     )
                     SettingsRow(
                         title = stringResource(R.string.settings_clear_history),
                         summary = stringResource(R.string.settings_clear_history_summary),
-                        onClick = onClearHistory,
+                        onClick = { showClearHistoryDialog = true },
+                        enabled = !isClearing,
                     )
                     SettingsRow(
                         title = stringResource(R.string.settings_clear_data),
                         summary = stringResource(R.string.settings_clear_data_summary),
                         onClick = { showClearDataDialog = true },
+                        enabled = !isClearing,
                     )
                     SettingsRow(
                         title = stringResource(R.string.settings_privacy_info),
@@ -208,6 +226,10 @@ internal fun SettingsContent(
                     )
                     SettingsRow(
                         title = stringResource(R.string.settings_licenses),
+                        onClick = openLicenses,
+                    )
+                    SettingsRow(
+                        title = stringResource(R.string.settings_about_app),
                         onClick = { onNavigate(Destination.ABOUT) },
                     )
                 }
@@ -219,6 +241,7 @@ internal fun SettingsContent(
                         title = stringResource(R.string.settings_verbose_errors),
                         summary = stringResource(R.string.settings_verbose_errors_summary),
                         checked = settings.verboseErrors,
+                        enabled = !isClearing,
                         onCheckedChange = onVerboseErrorsChange,
                     )
                     SettingsRow(
@@ -232,6 +255,28 @@ internal fun SettingsContent(
         }
     }
 
+    if (showClearHistoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearHistoryDialog = false },
+            title = { Text(stringResource(R.string.history_delete_all_title)) },
+            text = { Text(stringResource(R.string.history_delete_all_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearHistoryDialog = false
+                        onClearHistory()
+                    },
+                    enabled = !isClearing,
+                ) {
+                    Text(stringResource(R.string.action_delete_all))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearHistoryDialog = false }) { Text(stringResource(R.string.action_cancel)) }
+            },
+        )
+    }
+
     if (showClearDataDialog) {
         AlertDialog(
             onDismissRequest = { showClearDataDialog = false },
@@ -239,6 +284,7 @@ internal fun SettingsContent(
             text = { Text(stringResource(R.string.settings_clear_data_body)) },
             confirmButton = {
                 TextButton(
+                    enabled = !isClearing,
                     onClick = {
                         onClearAllData()
                         showClearDataDialog = false

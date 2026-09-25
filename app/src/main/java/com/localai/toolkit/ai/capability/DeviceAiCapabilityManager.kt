@@ -19,10 +19,11 @@ interface DeviceAiCapabilityManager {
     /**
      * Re-runs availability checks.
      *
-     * @param force when false, a recent snapshot may be reused.
+     * @param force when false, a recent complete snapshot may be reused.
+     * Single-task checks do not extend the freshness of unrelated capabilities.
      */
     suspend fun refresh(force: Boolean = false)
 
-    /** Re-checks a single task, e.g. right after a model download finishes. */
+    /** Re-checks one task in refresh order, e.g. after its model download finishes. */
     suspend fun refresh(task: AiTask)
 }

@@ -29,6 +29,12 @@ import javax.inject.Singleton
 abstract class AiModule {
 
     @Binds
+    abstract fun bindSpeechClientFactory(impl: com.localai.toolkit.ai.gemini.MlKitSpeechClientFactory): com.localai.toolkit.ai.gemini.SpeechClientFactory
+
+    @Binds
+    abstract fun bindAudioDecoder(impl: com.localai.toolkit.ai.audio.AndroidAudioDecoder): com.localai.toolkit.ai.audio.AudioDecoder
+
+    @Binds
     @Singleton
     abstract fun bindAiEngine(impl: GeminiNanoAiEngine): AiEngine
 

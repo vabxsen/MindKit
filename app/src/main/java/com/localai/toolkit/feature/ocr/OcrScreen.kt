@@ -1,5 +1,10 @@
 package com.localai.toolkit.feature.ocr
 
+import com.localai.toolkit.feature.common.HistorySaveFeedback
+import com.localai.toolkit.feature.common.ObserveHistorySaveFeedback
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -26,7 +31,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
@@ -49,11 +53,8 @@ import com.localai.toolkit.core.designsystem.theme.Spacing
 import com.localai.toolkit.core.ui.messageRes
 import com.localai.toolkit.core.ui.offersRetry
 import com.localai.toolkit.core.ui.technicalDetailOrNull
-import com.localai.toolkit.core.util.copyToClipboard
-import com.localai.toolkit.core.util.shareText
-import com.localai.toolkit.core.util.shouldShowCopyConfirmation
+import com.localai.toolkit.core.ui.rememberTextActionHandler
 import com.localai.toolkit.domain.model.ToolId
-import kotlinx.coroutines.launch
 
 @Composable
 fun OcrScreen(
@@ -68,6 +69,7 @@ fun OcrScreen(
     OcrContent(
         state = state,
         verboseErrors = verboseErrors,
+        saveFeedback = viewModel.saveFeedback,
         onImageSelected = viewModel::onImageSelected,
         onRetry = viewModel::onRetry,
         onClear = viewModel::onClear,
@@ -92,11 +94,12 @@ internal fun OcrContent(
     onSendTo: (ToolId) -> Unit,
     onNavigateUp: () -> Unit,
     modifier: Modifier = Modifier,
+    saveFeedback: Flow<HistorySaveFeedback> = emptyFlow(),
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val copiedMessage = stringResource(R.string.copied_to_clipboard)
+    ObserveHistorySaveFeedback(saveFeedback, snackbarHostState)
+    val textActions = rememberTextActionHandler(snackbarHostState)
 
     // The photo picker grants access to exactly the item the user chose, with no storage
     // permission of any kind.
@@ -186,15 +189,11 @@ internal fun OcrContent(
                     state.hasResult -> ResultCard(
                         text = state.extractedText,
                         label = stringResource(R.string.ocr_result_label),
-                        onCopy = {
-                            context.copyToClipboard("ocr", state.extractedText)
-                            if (shouldShowCopyConfirmation()) {
-                                scope.launch { snackbarHostState.showSnackbar(copiedMessage) }
-                            }
-                        },
-                        onShare = { context.shareText(state.extractedText) },
+                        onCopy = { textActions.copy("ocr", state.extractedText) },
+                        onShare = { textActions.share(state.extractedText) },
                         onSave = onSave,
                         saved = state.savedToHistory,
+                        saveEnabled = !state.isRecognizing,
                         // The point of OCR is rarely the text itself - it is what you do
                         // with it next, so the follow-ups are first-class here.
                         secondaryActions = listOf(

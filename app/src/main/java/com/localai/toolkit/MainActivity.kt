@@ -9,12 +9,12 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.localai.toolkit.core.designsystem.theme.LocalAiTheme
+import com.localai.toolkit.core.ui.AppRoot
 import com.localai.toolkit.core.navigation.Destination
 import com.localai.toolkit.core.ui.LocalAiApp
-import com.localai.toolkit.domain.model.ThemeMode
 import com.localai.toolkit.feature.share.IncomingShareStore
 import com.localai.toolkit.feature.share.toSharedContent
+import com.localai.toolkit.feature.share.toSavedState
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -37,35 +37,30 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        // Captured before the first composition so the start destination can account for
-        // it, rather than flashing Home and then jumping.
-        val launchedWithShare = captureShare(intent)
+        // Recreate only an unconsumed share after process death. Rotation must not
+        // replay a share that was already routed or dismissed.
+        if (savedInstanceState == null) {
+            captureShare(intent)
+        } else if (savedInstanceState.getBoolean(SHARE_PENDING)) {
+            // Android may relaunch with the original task intent, not the latest
+            // onNewIntent payload. Prefer our normalized, unconsumed saved share.
+            val restored = savedInstanceState.getBundle(SHARE_CONTENT)?.toSharedContent()
+            if (restored != null) incomingShareStore.set(restored) else captureShare(intent)
+        }
 
         setContent {
             val state by viewModel.uiState.collectAsStateWithLifecycle()
-            val settings = (state as? AppUiState.Ready)?.settings
-
-            // While settings load, the theme shell still renders so there is no flash of
-            // the wrong colour scheme before the stored preference arrives.
-            LocalAiTheme(
-                themeMode = settings?.themeMode ?: ThemeMode.SYSTEM,
-                dynamicColor = settings?.dynamicColor ?: true,
-            ) {
-                if (settings != null) {
-                    // Computed once and remembered without a key: the start destination is
-                    // where navigation *began*. Recomputing it when the user finishes
-                    // onboarding, or when the share is consumed, would reset the graph
-                    // underneath them.
-                    val startDestination = remember {
-                        when {
-                            launchedWithShare -> Destination.SHARE_ROUTER
-                            settings.onboardingCompleted -> Destination.HOME
-                            else -> Destination.ONBOARDING
-                        }
+            val pendingShare by incomingShareStore.pending.collectAsStateWithLifecycle()
+            AppRoot(state = state, onRetry = viewModel::retry) { settings ->
+                // Computed once: the start destination is where navigation began,
+                // not a reason to reset the graph after a preference update.
+                val startDestination = remember {
+                    when {
+                        settings.onboardingCompleted -> Destination.HOME
+                        else -> Destination.ONBOARDING
                     }
-
-                    LocalAiApp(startDestination = startDestination)
                 }
+                LocalAiApp(startDestination = startDestination, hasPendingShare = pendingShare != null)
             }
         }
     }
@@ -74,15 +69,23 @@ class MainActivity : ComponentActivity() {
      * Handles a share that arrives while the app is already running.
      *
      * The activity is singleTask, so a second share re-enters here rather than creating
-     * another instance. Recreating is the simplest correct way to re-evaluate the start
-     * destination, and the share itself is already safely in the store.
+     * another instance. The observable store navigates the existing graph, preserving
+     * the current tool and avoiding conflicts with a restored start destination.
      */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        setIntent(intent)
-        if (captureShare(intent)) {
-            recreate()
+        // Keep the pending share's recovery intent if the launcher merely brings
+        // the activity forward. A new valid share replaces it; unrelated intents do not.
+        if (captureShare(intent) || incomingShareStore.pending.value == null) {
+            setIntent(intent)
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        val pending = incomingShareStore.pending.value
+        outState.putBoolean(SHARE_PENDING, pending != null)
+        if (pending != null) outState.putBundle(SHARE_CONTENT, pending.toSavedState())
+        super.onSaveInstanceState(outState)
     }
 
     /** @return true when [intent] carried content the app can act on. */
@@ -90,5 +93,10 @@ class MainActivity : ComponentActivity() {
         val content = intent?.toSharedContent() ?: return false
         incomingShareStore.set(content)
         return true
+    }
+
+    private companion object {
+        const val SHARE_PENDING = "mindkit.share.pending"
+        const val SHARE_CONTENT = "mindkit.share.content"
     }
 }

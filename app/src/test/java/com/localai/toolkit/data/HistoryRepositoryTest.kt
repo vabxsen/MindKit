@@ -12,6 +12,11 @@ import com.localai.toolkit.domain.model.HistoryItem
 import com.localai.toolkit.domain.model.HistoryType
 import com.localai.toolkit.domain.model.ThemeMode
 import com.localai.toolkit.domain.repository.SettingsRepository
+import com.localai.toolkit.domain.repository.HistoryRepository
+import com.localai.toolkit.feature.common.HistorySaveController
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -64,6 +69,26 @@ class HistoryRepositoryTest {
         val stored = repository.observe().first()
         assertThat(stored).hasSize(1)
         assertThat(stored.single().title).isEqualTo("Meeting notes")
+    }
+
+    @Test
+    fun `saved result observes real Room row deletion and clearing`() = runTest {
+        for (clearAll in listOf(false, true)) {
+            val observed = CompletableDeferred<Long>()
+            val watchedRepository = object : HistoryRepository by repository {
+                override fun observeById(id: Long) = repository.observeById(id).onEach {
+                    if (it != null) observed.complete(it.id)
+                }
+            }
+            val states = Channel<Boolean>(Channel.UNLIMITED)
+            val controller = HistorySaveController(watchedRepository, this)
+            controller.save(item(), { true }) { states.trySend(it) }
+            assertThat(states.receive()).isTrue()
+            val id = observed.await()
+            if (clearAll) repository.deleteAll() else repository.delete(id)
+            assertThat(states.receive()).isFalse()
+            assertThat(repository.count()).isEqualTo(0)
+        }
     }
 
     @Test

@@ -45,20 +45,27 @@ fun GenAiGate(
             modifier = modifier,
         )
 
-        GateState.DOWNLOADING -> {
+        GateState.DOWNLOADING, GateState.DOWNLOADING_CHECK_FAILED -> {
             val progress = (downloadState as? ModelDownloadState.InProgress)?.fraction
-            LoadingState(
-                label = if (progress != null) {
-                    stringResource(
-                        R.string.loading_downloading_model_percent,
-                        (progress * 100).toInt(),
-                    )
-                } else {
-                    stringResource(R.string.loading_downloading_model)
-                },
-                progress = progress,
-                modifier = modifier,
-            )
+            Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Spacing.M)) {
+                LoadingState(
+                    label = if (progress != null) {
+                        stringResource(
+                            R.string.loading_downloading_model_percent,
+                            (progress * 100).toInt(),
+                        )
+                    } else {
+                        stringResource(R.string.loading_downloading_model)
+                    },
+                    progress = progress,
+                )
+                if (gateState == GateState.DOWNLOADING_CHECK_FAILED) {
+                    ErrorCard(message = stringResource(R.string.gate_check_failed))
+                }
+                Button(onClick = onRetryCheck, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.action_check_status))
+                }
+            }
         }
 
         GateState.NEEDS_DOWNLOAD -> Column(
@@ -71,6 +78,7 @@ fun GenAiGate(
                 icon = Icons.Outlined.DownloadForOffline,
                 title = stringResource(R.string.gate_download_title),
                 description = stringResource(R.string.gate_download_body),
+                fillAvailableSpace = false,
             )
             // A failed attempt is reported above the button so the user can see why
             // retrying might be worth it.

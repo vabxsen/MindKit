@@ -6,10 +6,13 @@ import com.localai.toolkit.domain.model.AppSettings
 import com.localai.toolkit.domain.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /** What the root composable needs before it can draw anything. */
 sealed interface AppUiState {
@@ -17,6 +20,7 @@ sealed interface AppUiState {
     data object Loading : AppUiState
 
     data class Ready(val settings: AppSettings) : AppUiState
+    data class Failed(val previousSettings: AppSettings? = null) : AppUiState
 }
 
 /**
@@ -25,14 +29,39 @@ sealed interface AppUiState {
  */
 @HiltViewModel
 class MainViewModel @Inject constructor(
-    settingsRepository: SettingsRepository,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
-    val uiState: StateFlow<AppUiState> = settingsRepository.settings
-        .map<AppSettings, AppUiState> { AppUiState.Ready(it) }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = AppUiState.Loading,
-        )
+    private val _uiState = MutableStateFlow<AppUiState>(AppUiState.Loading)
+    val uiState = _uiState.asStateFlow()
+    private var lastKnown: AppSettings? = null
+    private var readJob: Job? = null
+
+    init { readSettings() }
+
+    fun retry() {
+        if (_uiState.value is AppUiState.Failed) readSettings()
+    }
+
+    private fun readSettings() {
+        readJob?.cancel()
+        readJob = viewModelScope.launch {
+            try {
+                settingsRepository.settings.collect { settings ->
+                    currentCoroutineContext().ensureActive()
+                    if (settings.storageReadFailed) {
+                        _uiState.value = AppUiState.Failed(lastKnown)
+                    } else {
+                        lastKnown = settings
+                        _uiState.value = AppUiState.Ready(settings)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                currentCoroutineContext().ensureActive()
+                _uiState.value = AppUiState.Failed(lastKnown)
+            }
+        }
+    }
 }

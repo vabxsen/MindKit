@@ -6,7 +6,13 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.test.core.app.ApplicationProvider
+import com.localai.toolkit.R
 import com.google.common.truth.Truth.assertThat
 import com.localai.toolkit.core.designsystem.theme.LocalAiTheme
 import org.junit.Rule
@@ -31,10 +37,10 @@ class HomeScreenTest {
         }
 
         listOf("Ask AI", "Summarize", "Rewrite", "Proofread", "Extract Text").forEach { title ->
-            composeRule.onNodeWithText(title).performScrollTo().assertIsDisplayed()
+            scrollTo(title).assertIsDisplayed()
         }
         listOf("Translate", "Image AI", "Transcribe", "Developer").forEach { title ->
-            composeRule.onNodeWithText(title).performScrollTo().assertIsDisplayed()
+            scrollTo(title).assertIsDisplayed()
         }
     }
 
@@ -44,7 +50,7 @@ class HomeScreenTest {
             LocalAiTheme { HomeContent(state = HomePreviewStates.supported, onOpenTool = {}) }
         }
 
-        composeRule.onNodeWithText("AI Ready").assertIsDisplayed()
+        assertReadiness("AI Ready", R.string.home_status_ready_description)
     }
 
     @Test
@@ -55,8 +61,8 @@ class HomeScreenTest {
 
         // Hiding unsupported tools would leave the user with no idea why a feature they
         // read about is missing.
-        composeRule.onNodeWithText("Ask AI").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Limited Device Support").assertIsDisplayed()
+        assertReadiness("Limited Device Support", R.string.home_status_limited_description)
+        scrollTo("Ask AI").assertIsDisplayed()
     }
 
     @Test
@@ -71,7 +77,7 @@ class HomeScreenTest {
             }
         }
 
-        composeRule.onNodeWithText("Ask AI").performScrollTo().performClick()
+        scrollTo("Ask AI").performClick()
 
         assertThat(opened).isNull()
     }
@@ -88,7 +94,7 @@ class HomeScreenTest {
             }
         }
 
-        composeRule.onNodeWithText("Summarize").performScrollTo().performClick()
+        scrollTo("Summarize").performClick()
 
         assertThat(opened).isEqualTo("tool/summarize")
     }
@@ -101,8 +107,8 @@ class HomeScreenTest {
 
         // Text recognition is bundled and the developer utilities are deterministic, so
         // neither should be disabled just because Gemini Nano is missing.
-        composeRule.onNodeWithText("Extract Text").performScrollTo().assertIsEnabled()
-        composeRule.onNodeWithText("Developer").performScrollTo().assertIsEnabled()
+        scrollTo("Extract Text").assertIsEnabled()
+        scrollTo("Developer").assertIsEnabled()
     }
 
     @Test
@@ -111,8 +117,8 @@ class HomeScreenTest {
             LocalAiTheme { HomeContent(state = HomePreviewStates.modelRequired, onOpenTool = {}) }
         }
 
-        composeRule.onNodeWithText("Model Required").assertIsDisplayed()
-        composeRule.onNodeWithText("Summarize").performScrollTo().assertIsEnabled()
+        assertReadiness("Model Required", R.string.home_status_model_required_description)
+        scrollTo("Summarize").assertIsEnabled()
     }
 
     @Test
@@ -121,7 +127,7 @@ class HomeScreenTest {
             LocalAiTheme { HomeContent(state = HomePreviewStates.checking, onOpenTool = {}) }
         }
 
-        composeRule.onNodeWithText("Checking device").assertIsDisplayed()
+        assertReadiness("Checking device", R.string.loading_checking_availability)
     }
 
     @Test
@@ -130,6 +136,20 @@ class HomeScreenTest {
             LocalAiTheme { HomeContent(state = HomePreviewStates.unsupported, onOpenTool = {}) }
         }
 
-        composeRule.onNodeWithText("Image AI").performScrollTo().assertIsNotEnabled()
+        scrollTo("Image AI").assertIsNotEnabled()
+    }
+
+    private fun scrollTo(text: String): SemanticsNodeInteraction {
+        // Off-screen lazy items need list-level scrolling before node lookup.
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(text))
+        return composeRule.onNodeWithText(text)
+    }
+
+    private fun assertReadiness(label: String, descriptionRes: Int) {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        // StatusChip deliberately exposes one descriptive TalkBack node instead of
+        // its visual children. Verify both that node and the actual rendered label.
+        composeRule.onNodeWithContentDescription(context.getString(descriptionRes)).assertIsDisplayed()
+        composeRule.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
     }
 }

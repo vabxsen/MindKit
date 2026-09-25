@@ -22,6 +22,7 @@ fun AiFailure.messageRes(): Int = when (this) {
     is AiFailure.InvalidInput ->
         if (tooLarge) R.string.error_input_too_long else R.string.error_input_too_short
     is AiFailure.InvalidImage -> R.string.error_invalid_image
+    is AiFailure.InvalidAudio -> R.string.error_invalid_audio
     is AiFailure.NotEnoughStorage -> R.string.error_not_enough_storage
     is AiFailure.NeedsSystemUpdate -> R.string.error_needs_system_update
     is AiFailure.Cancelled -> R.string.error_cancelled

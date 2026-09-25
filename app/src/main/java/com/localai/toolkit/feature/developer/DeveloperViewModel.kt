@@ -1,5 +1,7 @@
 package com.localai.toolkit.feature.developer
 
+import com.localai.toolkit.feature.common.HistorySaveController
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.localai.toolkit.ai.capability.DeviceAiCapabilityManager
@@ -20,6 +22,7 @@ import com.localai.toolkit.domain.usecase.devtools.JsonParseException
 import com.localai.toolkit.domain.usecase.devtools.formatJson
 import com.localai.toolkit.domain.usecase.devtools.minifyJson
 import com.localai.toolkit.domain.usecase.devtools.parseJson
+import com.localai.toolkit.domain.usecase.devtools.MAX_JSON_INPUT_CHARS
 import com.localai.toolkit.feature.common.GenAiFeatureGate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -69,13 +72,27 @@ class DeveloperViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(DeveloperUiState())
     val uiState: StateFlow<DeveloperUiState> = _uiState.asStateFlow()
 
+    private val historySave = HistorySaveController(historyRepository, viewModelScope)
+    val saveFeedback = historySave.feedback
+
     val verboseErrors: StateFlow<Boolean> = settingsRepository.settings
         .map { it.verboseErrors }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private var job: Job? = null
 
+    private fun invalidateResult() {
+        job?.cancel()
+        job = null
+        _uiState.value = _uiState.value.copy(
+            output = "", inputError = null, failure = null,
+            isGenerating = false, savedToHistory = false,
+        )
+    }
+
     fun onInputChange(value: String) {
+        if (_uiState.value.input == value) return
+        invalidateResult()
         _uiState.value = _uiState.value.copy(
             input = value,
             inputError = null,
@@ -84,14 +101,20 @@ class DeveloperViewModel @Inject constructor(
     }
 
     fun onErrorLanguageChange(language: ErrorLanguage) {
+        if (_uiState.value.errorLanguage == language) return
+        invalidateResult()
         _uiState.value = _uiState.value.copy(errorLanguage = language)
     }
 
     fun onBase64DirectionChange(decode: Boolean) {
+        if (_uiState.value.base64Decode == decode) return
+        invalidateResult()
         _uiState.value = _uiState.value.copy(base64Decode = decode, output = "", inputError = null)
     }
 
     fun onUrlDirectionChange(decode: Boolean) {
+        if (_uiState.value.urlDecode == decode) return
+        invalidateResult()
         _uiState.value = _uiState.value.copy(urlDecode = decode, output = "", inputError = null)
     }
 
@@ -117,6 +140,11 @@ class DeveloperViewModel @Inject constructor(
 
     /** Runs [tool] against the current input. */
     fun run(tool: DeveloperTool) {
+        if (_uiState.value.input.length > MAX_JSON_INPUT_CHARS && tool != DeveloperTool.UUID_GENERATOR) {
+            invalidateResult()
+            _uiState.value = _uiState.value.copy(inputError = INPUT_TOO_LARGE_MARKER)
+            return
+        }
         when (tool) {
             DeveloperTool.EXPLAIN_ERROR -> explain(isCode = false)
             DeveloperTool.EXPLAIN_CODE -> explain(isCode = true)
@@ -125,6 +153,7 @@ class DeveloperViewModel @Inject constructor(
     }
 
     private fun runDeterministic(tool: DeveloperTool) {
+        invalidateResult()
         val state = _uiState.value
         val input = state.input
 
@@ -272,18 +301,18 @@ class DeveloperViewModel @Inject constructor(
 
     fun onSave() {
         val state = _uiState.value
-        if (!state.hasOutput) return
-        viewModelScope.launch {
-            val saved = historyRepository.save(
-                HistoryItem(
-                    type = HistoryType.DEVELOPER,
-                    title = titleOf(state.input),
-                    inputPreview = previewOf(state.input),
-                    output = state.output,
-                    createdAtEpochMillis = System.currentTimeMillis(),
-                ),
-            )
-            _uiState.value = _uiState.value.copy(savedToHistory = saved != null)
+        if (!state.hasOutput || state.isGenerating || state.savedToHistory) return
+        historySave.save(
+            item = HistoryItem(
+                type = HistoryType.DEVELOPER,
+                title = titleOf(state.input),
+                inputPreview = previewOf(state.input),
+                output = state.output,
+                createdAtEpochMillis = System.currentTimeMillis(),
+            ),
+            isCurrent = { _uiState.value.output == state.output && _uiState.value.input == state.input && !_uiState.value.isGenerating },
+        ) { saved ->
+            _uiState.value = _uiState.value.copy(savedToHistory = saved)
         }
     }
 
@@ -294,7 +323,6 @@ class DeveloperViewModel @Inject constructor(
     override fun onCleared() {
         job?.cancel()
         gate.release()
-        super.onCleared()
     }
 
     private sealed interface DeterministicResult {
@@ -313,12 +341,15 @@ class DeveloperViewModel @Inject constructor(
         // Markers the screen turns into localised strings. Kept as constants rather than
         // string resources here so the ViewModel stays free of Android resources and
         // testable on the JVM.
-        const val VALID_JSON_MARKER = "VALID_JSON"
+        // Success text is also exported and stored; unlike error-only markers it
+        // must remain human-readable outside this screen.
+        const val VALID_JSON_MARKER = "Valid JSON"
         const val INVALID_JSON_MARKER = "INVALID_JSON"
         const val INVALID_BASE64_MARKER = "INVALID_BASE64"
         const val INVALID_URL_MARKER = "INVALID_URL"
         const val INVALID_JWT_MARKER = "INVALID_JWT"
         const val INVALID_TIMESTAMP_MARKER = "INVALID_TIMESTAMP"
+        const val INPUT_TOO_LARGE_MARKER = "INPUT_TOO_LARGE"
     }
 }
 

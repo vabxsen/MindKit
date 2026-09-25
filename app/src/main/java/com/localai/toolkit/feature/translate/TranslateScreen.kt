@@ -1,5 +1,10 @@
 package com.localai.toolkit.feature.translate
 
+import com.localai.toolkit.feature.common.HistorySaveFeedback
+import com.localai.toolkit.feature.common.ObserveHistorySaveFeedback
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,7 +39,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +48,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.localai.toolkit.R
 import com.localai.toolkit.ai.mlkit.TranslationLanguage
 import com.localai.toolkit.core.designsystem.component.ErrorCard
@@ -57,10 +63,7 @@ import com.localai.toolkit.core.designsystem.theme.Spacing
 import com.localai.toolkit.core.ui.messageRes
 import com.localai.toolkit.core.ui.offersRetry
 import com.localai.toolkit.core.ui.technicalDetailOrNull
-import com.localai.toolkit.core.util.copyToClipboard
-import com.localai.toolkit.core.util.shareText
-import com.localai.toolkit.core.util.shouldShowCopyConfirmation
-import kotlinx.coroutines.launch
+import com.localai.toolkit.core.ui.rememberTextActionHandler
 
 @Composable
 fun TranslateScreen(
@@ -70,10 +73,12 @@ fun TranslateScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val verboseErrors by viewModel.verboseErrors.collectAsStateWithLifecycle()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.onRefreshModels() }
 
     TranslateContent(
         state = state,
         verboseErrors = verboseErrors,
+        saveFeedback = viewModel.saveFeedback,
         onInputChange = viewModel::onInputChange,
         onSourceChange = viewModel::onSourceChange,
         onTargetChange = viewModel::onTargetChange,
@@ -84,6 +89,9 @@ fun TranslateScreen(
         onSave = viewModel::onSave,
         onClear = viewModel::onClear,
         onNavigateUp = onNavigateUp,
+        onRefreshModels = viewModel::onRefreshModels,
+        onRetryFailure = viewModel::onRetryFailure,
+        onRetryLanguagePreferences = viewModel::onRetryLanguagePreferences,
         modifier = modifier,
     )
 }
@@ -103,11 +111,15 @@ internal fun TranslateContent(
     onClear: () -> Unit,
     onNavigateUp: () -> Unit,
     modifier: Modifier = Modifier,
+    saveFeedback: Flow<HistorySaveFeedback> = emptyFlow(),
+    onRefreshModels: () -> Unit = {},
+    onRetryFailure: () -> Unit = onTranslate,
+    onRetryLanguagePreferences: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val copiedMessage = stringResource(R.string.copied_to_clipboard)
+    ObserveHistorySaveFeedback(saveFeedback, snackbarHostState)
+    val textActions = rememberTextActionHandler(snackbarHostState)
 
     var pickerFor by remember { mutableStateOf<LanguageSlot?>(null) }
 
@@ -159,6 +171,14 @@ internal fun TranslateContent(
                 )
             }
 
+            if (state.languagePreferencesFailed) {
+                ErrorCard(
+                    message = stringResource(R.string.translate_language_preferences_failed),
+                    actionLabel = stringResource(R.string.action_retry),
+                    onAction = onRetryLanguagePreferences,
+                )
+            }
+
             if (state.detectedSourceCode != null) {
                 AssistChip(
                     onClick = onAcceptDetected,
@@ -192,7 +212,18 @@ internal fun TranslateContent(
 
             // Missing language packs are stated up front rather than as a failure after
             // the user presses Translate.
-            state.missingModels.forEach { code ->
+            if (state.isRefreshingModels) {
+                LoadingState(label = stringResource(R.string.models_loading))
+            } else if (state.modelFailure != null) {
+                ErrorCard(
+                    message = stringResource(state.modelFailure.messageRes()),
+                    technicalDetail = state.modelFailure.technicalDetailOrNull(context, verboseErrors),
+                    actionLabel = stringResource(R.string.action_retry),
+                    onAction = onRefreshModels,
+                )
+            }
+            val missingModels = if (state.isRefreshingModels || state.modelFailure != null) emptyList() else state.missingModels
+            missingModels.forEach { code ->
                 val name = state.displayNameOf(code)
                 if (state.downloadingCode == code) {
                     LoadingState(
@@ -209,7 +240,8 @@ internal fun TranslateContent(
 
             Button(
                 onClick = onTranslate,
-                enabled = state.canTranslate && state.missingModels.isEmpty(),
+                enabled = state.canTranslate && state.missingModels.isEmpty() &&
+                    !state.isRefreshingModels && state.modelFailure == null,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(stringResource(R.string.translate_action)) }
 
@@ -221,26 +253,22 @@ internal fun TranslateContent(
                 state.failure != null -> ErrorCard(
                     message = stringResource(state.failure.messageRes()),
                     technicalDetail = state.failure.technicalDetailOrNull(context, verboseErrors),
-                    actionLabel = if (state.failure.offersRetry) {
+                    actionLabel = if (state.failure.offersRetry || state.failedDownloadCode != null) {
                         stringResource(R.string.action_retry)
                     } else {
                         null
                     },
-                    onAction = onTranslate.takeIf { state.failure.offersRetry },
+                    onAction = onRetryFailure.takeIf { state.failure.offersRetry || state.failedDownloadCode != null },
                 )
 
                 state.hasResult -> ResultCard(
                     text = state.output,
                     label = stringResource(R.string.translate_result_label),
-                    onCopy = {
-                        context.copyToClipboard("translation", state.output)
-                        if (shouldShowCopyConfirmation()) {
-                            scope.launch { snackbarHostState.showSnackbar(copiedMessage) }
-                        }
-                    },
-                    onShare = { context.shareText(state.output) },
+                    onCopy = { textActions.copy("translation", state.output) },
+                    onShare = { textActions.share(state.output) },
                     onSave = onSave,
                     saved = state.savedToHistory,
+                    saveEnabled = !state.isTranslating,
                 )
             }
 

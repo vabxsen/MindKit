@@ -5,14 +5,17 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.localai.toolkit.domain.model.AppSettings
 import com.localai.toolkit.domain.model.ThemeMode
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.map
 
 private val Context.preferencesDataStore: DataStore<Preferences> by preferencesDataStore(
@@ -36,11 +39,6 @@ class SettingsDataStore(private val context: Context) {
     }
 
     val settings: Flow<AppSettings> = context.preferencesDataStore.data
-        // A corrupt or unreadable preferences file must not take the app down; fall back
-        // to defaults so every screen stays usable.
-        .catch { throwable ->
-            if (throwable is IOException) emit(emptyPreferences()) else throw throwable
-        }
         .map { prefs ->
             val defaults = AppSettings()
             AppSettings(
@@ -55,7 +53,7 @@ class SettingsDataStore(private val context: Context) {
                 lastTranslateSource = prefs[Keys.TRANSLATE_SOURCE],
                 lastTranslateTarget = prefs[Keys.TRANSLATE_TARGET],
             )
-        }
+        }.recoverReadFailures()
 
     suspend fun setThemeMode(mode: ThemeMode) = edit { it[Keys.THEME_MODE] = mode.name }
 
@@ -81,4 +79,17 @@ class SettingsDataStore(private val context: Context) {
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         context.preferencesDataStore.edit(block)
     }
+}
+
+/** Keep observing after a transient read error; never silently switch history on. */
+internal fun Flow<AppSettings>.recoverReadFailures(): Flow<AppSettings> = flow {
+    var lastKnown = AppSettings(saveHistory = false)
+    emitAll(
+        onEach { lastKnown = it }.retryWhen { cause, _ ->
+            if (cause !is IOException) return@retryWhen false
+            emit(lastKnown.copy(saveHistory = false, storageReadFailed = true))
+            delay(5_000)
+            true
+        },
+    )
 }

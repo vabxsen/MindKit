@@ -1,6 +1,7 @@
 package com.localai.toolkit.feature.image
 
-import android.content.Context
+import com.localai.toolkit.feature.common.HistorySaveController
+
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -11,10 +12,9 @@ import com.localai.toolkit.ai.engine.AnalyzeImageRequest
 import com.localai.toolkit.ai.engine.DescribeImageRequest
 import com.localai.toolkit.core.navigation.HandoffPayload
 import com.localai.toolkit.core.navigation.ToolHandoff
-import com.localai.toolkit.core.util.decodeDownsampledBitmap
+import com.localai.toolkit.core.util.ImageLoader
 import com.localai.toolkit.core.util.previewOf
 import com.localai.toolkit.core.util.titleOf
-import com.localai.toolkit.di.IoDispatcher
 import com.localai.toolkit.domain.model.AiCapability
 import com.localai.toolkit.domain.model.AiException
 import com.localai.toolkit.domain.model.AiFailure
@@ -26,10 +26,10 @@ import com.localai.toolkit.domain.repository.HistoryRepository
 import com.localai.toolkit.domain.repository.SettingsRepository
 import com.localai.toolkit.feature.common.GenAiFeatureGate
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,7 +37,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /** Which of the two image tasks the user asked for. */
 enum class ImageMode { DESCRIBE, ASK }
@@ -45,6 +44,7 @@ enum class ImageMode { DESCRIBE, ASK }
 data class ImageUiState(
     val imageUri: Uri? = null,
     val preview: Bitmap? = null,
+    val isLoadingImage: Boolean = false,
     val mode: ImageMode = ImageMode.DESCRIBE,
     val question: String = "",
     val output: String = "",
@@ -74,13 +74,12 @@ data class ImageUiState(
 
 @HiltViewModel
 class ImageViewModel @Inject constructor(
-    @param:ApplicationContext private val context: Context,
+    private val imageLoader: ImageLoader,
     private val engine: AiEngine,
     private val historyRepository: HistoryRepository,
     private val toolHandoff: ToolHandoff,
     capabilityManager: DeviceAiCapabilityManager,
     settingsRepository: SettingsRepository,
-    @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
 
     private val describeGate =
@@ -97,11 +96,15 @@ class ImageViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ImageUiState())
     val uiState: StateFlow<ImageUiState> = _uiState.asStateFlow()
 
+    private val historySave = HistorySaveController(historyRepository, viewModelScope)
+    val saveFeedback = historySave.feedback
+
     val verboseErrors: StateFlow<Boolean> = settingsRepository.settings
         .map { it.verboseErrors }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private var job: Job? = null
+    private var imageLoadJob: Job? = null
 
     init {
         toolHandoff.consume(ToolId.IMAGE)?.imageUri?.let(::onImageSelected)
@@ -109,27 +112,32 @@ class ImageViewModel @Inject constructor(
 
     fun onImageSelected(uri: Uri) {
         job?.cancel()
-        _uiState.value.preview?.recycle()
-        _uiState.value = ImageUiState(imageUri = uri, mode = _uiState.value.mode)
+        imageLoadJob?.cancel()
+        // Compose and in-flight native inference may still hold the previous bitmap.
+        // Drop our reference instead of recycling a bitmap those consumers can use.
+        _uiState.value = ImageUiState(imageUri = uri, mode = _uiState.value.mode, isLoadingImage = true)
 
-        viewModelScope.launch {
-            val bitmap = withContext(ioDispatcher) {
-                context.decodeDownsampledBitmap(uri, ImageUiState.MODEL_MAX_DIMENSION)
-            }
+        imageLoadJob = viewModelScope.launch {
+            val bitmap = imageLoader.load(uri, ImageUiState.MODEL_MAX_DIMENSION)
+            currentCoroutineContext().ensureActive()
             _uiState.value = if (bitmap == null) {
-                _uiState.value.copy(failure = AiFailure.InvalidImage())
+                _uiState.value.copy(isLoadingImage = false, failure = AiFailure.InvalidImage())
             } else {
-                _uiState.value.copy(preview = bitmap)
+                _uiState.value.copy(preview = bitmap, isLoadingImage = false)
             }
         }
     }
 
     fun onModeChange(mode: ImageMode) {
-        _uiState.value = _uiState.value.copy(mode = mode, output = "", failure = null)
+        if (_uiState.value.mode == mode) return
+        onStop()
+        _uiState.value = _uiState.value.copy(mode = mode, output = "", failure = null, savedToHistory = false)
     }
 
     fun onQuestionChange(value: String) {
-        _uiState.value = _uiState.value.copy(question = value)
+        if (_uiState.value.question == value) return
+        onStop()
+        _uiState.value = _uiState.value.copy(question = value, output = "", failure = null, savedToHistory = false)
     }
 
     fun onRun() {
@@ -150,6 +158,7 @@ class ImageViewModel @Inject constructor(
                 when (state.mode) {
                     ImageMode.DESCRIBE -> {
                         val description = engine.describeImage(DescribeImageRequest(bitmap))
+                        currentCoroutineContext().ensureActive()
                         _uiState.value = _uiState.value.copy(
                             isWorking = false,
                             output = description,
@@ -193,22 +202,26 @@ class ImageViewModel @Inject constructor(
 
     fun onSave() {
         val state = _uiState.value
-        if (!state.hasResult) return
-        viewModelScope.launch {
-            val saved = historyRepository.save(
-                HistoryItem(
-                    type = HistoryType.IMAGE_DESCRIPTION,
-                    title = titleOf(
-                        state.question.ifBlank { state.output },
-                    ),
-                    // The image is never stored; only what the user asked about it.
-                    inputPreview = previewOf(state.question.ifBlank { "Image" }),
-                    output = state.output,
-                    createdAtEpochMillis = System.currentTimeMillis(),
-                    metadata = state.mode.name,
+        if (!state.hasResult || state.isWorking || state.savedToHistory) return
+        historySave.save(
+            item = HistoryItem(
+                type = HistoryType.IMAGE_DESCRIPTION,
+                title = titleOf(
+                    state.question.ifBlank { state.output },
                 ),
-            )
-            _uiState.value = _uiState.value.copy(savedToHistory = saved != null)
+                // The image is never stored; only what the user asked about it.
+                inputPreview = previewOf(state.question.ifBlank { "Image" }),
+                output = state.output,
+                createdAtEpochMillis = System.currentTimeMillis(),
+                metadata = state.mode.name,
+            ),
+            isCurrent = {
+                _uiState.value.output == state.output && _uiState.value.imageUri == state.imageUri &&
+                    _uiState.value.question == state.question && _uiState.value.mode == state.mode &&
+                    !_uiState.value.isWorking
+            },
+        ) { saved ->
+            _uiState.value = _uiState.value.copy(savedToHistory = saved)
         }
     }
 
@@ -226,7 +239,7 @@ class ImageViewModel @Inject constructor(
 
     fun onClear() {
         job?.cancel()
-        _uiState.value.preview?.recycle()
+        imageLoadJob?.cancel()
         _uiState.value = ImageUiState(mode = _uiState.value.mode)
     }
 
@@ -241,9 +254,8 @@ class ImageViewModel @Inject constructor(
 
     override fun onCleared() {
         job?.cancel()
-        _uiState.value.preview?.recycle()
+        imageLoadJob?.cancel()
         describeGate.release()
         askGate.release()
-        super.onCleared()
     }
 }

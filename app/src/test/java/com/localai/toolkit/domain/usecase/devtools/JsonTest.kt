@@ -13,6 +13,30 @@ import org.junit.Test
  */
 class JsonTest {
 
+    @Test fun `deep and oversized JSON fail with readable errors rather than exhausting resources`() {
+        val nested = "[".repeat(129) + "0" + "]".repeat(129)
+        val failure = runCatching { parseJson(nested) }.exceptionOrNull()
+        assertThat(failure).isInstanceOf(JsonParseException::class.java)
+        assertThat(failure!!.message).contains("nesting exceeds")
+        assertThat(runCatching { parseJson(" ".repeat(MAX_JSON_INPUT_CHARS + 1)) }.exceptionOrNull())
+            .isInstanceOf(JsonParseException::class.java)
+        val valid = "[".repeat(128) + "0" + "]".repeat(128)
+        assertThat(minifyJson(parseJson(valid))).isEqualTo(valid)
+    }
+
+    @Test fun `pretty printing refuses explosive indentation output`() {
+        val nested = "[".repeat(127) + "[" + List(10_000) { "0" }.joinToString(",") + "]".repeat(128)
+        val failure = runCatching { formatJson(parseJson(nested)) }.exceptionOrNull()
+        assertThat(failure).isInstanceOf(JsonParseException::class.java)
+        assertThat(failure!!.message).contains("formatted result exceeds")
+    }
+
+    @Test fun `non ASCII numbers and signed unicode escapes are not valid JSON`() {
+        listOf("١", "1.١", "1e١", "\"\\u+123\"", "\"\\u-123\"").forEach { input ->
+            assertThat(runCatching { parseJson(input) }.exceptionOrNull()).isInstanceOf(JsonParseException::class.java)
+        }
+    }
+
     @Test
     fun `an object is pretty-printed with two-space indentation`() {
         val formatted = formatJson(parseJson("""{"a":1,"b":"two"}"""))

@@ -1,5 +1,10 @@
 package com.localai.toolkit.feature.ask
 
+import com.localai.toolkit.feature.common.HistorySaveFeedback
+import com.localai.toolkit.feature.common.ObserveHistorySaveFeedback
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -44,7 +49,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,15 +73,12 @@ import com.localai.toolkit.core.designsystem.theme.Spacing
 import com.localai.toolkit.core.ui.messageRes
 import com.localai.toolkit.core.ui.offersRetry
 import com.localai.toolkit.core.ui.technicalDetailOrNull
-import com.localai.toolkit.core.util.copyToClipboard
-import com.localai.toolkit.core.util.shareText
-import com.localai.toolkit.core.util.shouldShowCopyConfirmation
+import com.localai.toolkit.core.ui.rememberTextActionHandler
 import com.localai.toolkit.domain.model.AiCapability
 import com.localai.toolkit.domain.model.AiTask
 import com.localai.toolkit.feature.common.GateState
 import com.localai.toolkit.feature.common.GenAiGate
 import com.localai.toolkit.feature.common.gateStateOf
-import kotlinx.coroutines.launch
 
 @Composable
 fun AskScreen(
@@ -95,6 +96,7 @@ fun AskScreen(
         capability = capability,
         downloadState = downloadState,
         verboseErrors = verboseErrors,
+        saveFeedback = viewModel.saveFeedback,
         onInputChange = viewModel::onInputChange,
         onSend = viewModel::onSend,
         onStop = viewModel::onStop,
@@ -117,19 +119,19 @@ internal fun AskContent(
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
-    onRetry: () -> Unit,
+    onRetry: (Long) -> Unit,
     onNewConversation: () -> Unit,
     onSave: (Long) -> Unit,
     onDownload: () -> Unit,
     onRetryCheck: () -> Unit,
     onNavigateUp: () -> Unit,
     modifier: Modifier = Modifier,
+    saveFeedback: Flow<HistorySaveFeedback> = emptyFlow(),
 ) {
-    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
+    ObserveHistorySaveFeedback(saveFeedback, snackbarHostState)
     val listState = rememberLazyListState()
-    val copiedMessage = stringResource(R.string.copied_to_clipboard)
+    val textActions = rememberTextActionHandler(snackbarHostState)
     var showInfo by remember { mutableStateOf(false) }
 
     val gateState = gateStateOf(capability, downloadState)
@@ -221,17 +223,11 @@ internal fun AskContent(
                                     message = message,
                                     saved = message.id in state.savedMessageIds,
                                     verboseErrors = verboseErrors,
-                                    onCopy = {
-                                        context.copyToClipboard("answer", message.text)
-                                        if (shouldShowCopyConfirmation()) {
-                                            scope.launch {
-                                                snackbarHostState.showSnackbar(copiedMessage)
-                                            }
-                                        }
-                                    },
-                                    onShare = { context.shareText(message.text) },
+                                    onCopy = { textActions.copy("answer", message.text) },
+                                    onShare = { textActions.share(message.text) },
                                     onSave = { onSave(message.id) },
-                                    onRetry = onRetry,
+                                    onRetry = { onRetry(message.id) },
+                                    canRetry = !state.isGenerating,
                                 )
                             }
                         }
@@ -300,6 +296,7 @@ private fun MessageBubble(
     onShare: () -> Unit,
     onSave: () -> Unit,
     onRetry: () -> Unit,
+    canRetry: Boolean,
 ) {
     val context = LocalContext.current
     val isUser = message.role == AskRole.USER
@@ -312,12 +309,12 @@ private fun MessageBubble(
             ErrorCard(
                 message = stringResource(message.failure.messageRes()),
                 technicalDetail = message.failure.technicalDetailOrNull(context, verboseErrors),
-                actionLabel = if (message.failure.offersRetry) {
+                actionLabel = if (message.failure.offersRetry && canRetry) {
                     stringResource(R.string.action_retry)
                 } else {
                     null
                 },
-                onAction = onRetry.takeIf { message.failure.offersRetry },
+                onAction = onRetry.takeIf { message.failure.offersRetry && canRetry },
             )
             return@Column
         }
@@ -375,7 +372,7 @@ private fun MessageBubble(
                         stringResource(if (saved) R.string.action_saved else R.string.action_save),
                     )
                 }
-                TextButton(onClick = onRetry) {
+                TextButton(onClick = onRetry, enabled = canRetry) {
                     Text(stringResource(R.string.action_regenerate))
                 }
             }

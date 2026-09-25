@@ -84,10 +84,11 @@ fun EmptyState(
     modifier: Modifier = Modifier,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    fillAvailableSpace: Boolean = true,
 ) {
     Column(
         modifier = modifier
-            .fillMaxSize()
+            .then(if (fillAvailableSpace) Modifier.fillMaxSize() else Modifier.fillMaxWidth())
             .padding(horizontal = Spacing.XXXL, vertical = Spacing.XXL),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,

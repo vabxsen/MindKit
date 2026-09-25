@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.unit.dp
 import com.localai.toolkit.R
 import com.localai.toolkit.ai.engine.ModelDownloadState
@@ -100,7 +101,7 @@ fun TextToolScaffold(
                     // have input limits, and a long paste is the usual reason a request
                     // is rejected.
                     Text(
-                        text = stringResource(R.string.summarize_char_count, input.length),
+                        text = pluralStringResource(R.plurals.summarize_char_count, input.length, input.length),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.align(Alignment.End),

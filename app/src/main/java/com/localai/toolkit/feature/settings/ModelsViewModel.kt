@@ -8,6 +8,7 @@ import com.localai.toolkit.domain.model.AiException
 import com.localai.toolkit.domain.model.AiFailure
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,6 +46,7 @@ class ModelsViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ModelsUiState())
     val uiState: StateFlow<ModelsUiState> = _uiState.asStateFlow()
+    private var refreshJob: Job? = null
 
     init {
         _uiState.value = _uiState.value.copy(languages = translationEngine.supportedLanguages())
@@ -56,7 +58,7 @@ class ModelsViewModel @Inject constructor(
     }
 
     fun onDownload(code: String) {
-        if (_uiState.value.busyCode != null) return
+        if (_uiState.value.busyCode != null || _uiState.value.isLoading) return
         _uiState.value = _uiState.value.copy(busyCode = code, failure = null)
         viewModelScope.launch {
             try {
@@ -71,7 +73,7 @@ class ModelsViewModel @Inject constructor(
     }
 
     fun onDelete(code: String) {
-        if (_uiState.value.busyCode != null) return
+        if (_uiState.value.busyCode != null || _uiState.value.isLoading) return
         _uiState.value = _uiState.value.copy(busyCode = code, failure = null)
         viewModelScope.launch {
             try {
@@ -86,7 +88,9 @@ class ModelsViewModel @Inject constructor(
     }
 
     fun refresh() {
-        viewModelScope.launch { loadDownloaded() }
+        if (_uiState.value.busyCode != null || refreshJob?.isActive == true) return
+        _uiState.value = _uiState.value.copy(isLoading = true, failure = null)
+        refreshJob = viewModelScope.launch { loadDownloaded() }
     }
 
     private suspend fun loadDownloaded() {
@@ -94,6 +98,7 @@ class ModelsViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(
                 downloaded = translationEngine.downloadedLanguages(),
                 isLoading = false,
+                failure = null,
             )
         } catch (e: AiException) {
             _uiState.value = _uiState.value.copy(isLoading = false, failure = e.failure)

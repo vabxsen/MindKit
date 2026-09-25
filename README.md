@@ -57,6 +57,11 @@ Other things the app does:
 - **Streaming output** for Ask AI and image questions, with a stop control.
 - **Model management.** Translation language packs can be downloaded and deleted from
   Settings → Models.
+- **Preference persistence.** Settings, translation language selections, onboarding
+  completion and confirmed data resets share an app-owned ordered queue. Accepted
+  writes survive leaving a screen, and older selections cannot overtake a later
+  reset. This queue is not durable across process death. Clearing history and
+  preferences is not one cross-database transaction; storage failures remain retryable.
 
 ---
 
@@ -181,8 +186,12 @@ Those statuses map onto six app-level states — `AVAILABLE`, `DOWNLOADABLE`,
 "not checked yet". `UNKNOWN` renders as *Checking*, never as *unsupported*, so the app
 never tells you your hardware cannot do something before it has actually asked.
 
-Results are cached for 60 seconds so opening Home, then a tool, then the capability screen
-does not re-probe AICore three times. A completed model download re-checks immediately.
+Complete snapshots are cached for 60 seconds using elapsed realtime, so opening Home,
+then a tool, then the capability screen does not re-probe AICore three times. Checking one
+tool does not renew other tools' results. Checks and publication are serialized so an
+older response cannot overwrite a newer one. Refresh bypasses the cache; completed model
+downloads request a fresh task check. Cancellation or failure does not renew full-snapshot
+freshness, and wall-clock adjustments do not change its expiry.
 
 Nothing is probed at process start: `LocalAiApplication` does no work, and the first
 capability check happens when a screen needs one.
@@ -235,13 +244,44 @@ details** to see the mapped technical line underneath.
 long and image URIs must not be re-encoded into a navigation argument, so `ToolHandoff`
 carries a one-shot payload that the destination consumes exactly once.
 
+Incoming shares are separate: while a share is still waiting in the action router,
+its normalized text or URI is included in Android activity saved state. This preserves
+the latest share across OS process death even when Android supplies the original launch
+intent. Consumed/dismissed shares are not restored. This is not a history entry, does not
+save file bytes, and does not create or extend URI permissions. Unsaved tool drafts and
+in-memory handoffs are not guaranteed to survive process death.
+
 ### Inference lifecycle
 
-GenAI clients hold an AICore session. `GenAiClientProvider` caches exactly one client per
-feature, keyed by its options (a rewriter built for `PROFESSIONAL` cannot produce
-`FRIENDLY` output, so changing style closes the old client). Every tool ViewModel releases
-its client in `onCleared()`, so a backgrounded app is not holding an inference session
-open. In-flight generation is cancelled when the screen goes away.
+For text/image features, `GenAiClientProvider` caches clients keyed by their options.
+Inference, downloads and status checks hold use-scoped leases. Changing options or
+releasing a screen retires its cached client, but it is closed only after its last active
+user finishes or cancels; a status check cannot close another operation's client.
+Tool ViewModels cancel their own jobs and request release when they are cleared.
+Idle clients remain reusable until replaced/released. Native SDK concurrency still
+requires supported-device verification; leases govern app-side lifetime, not model capacity.
+
+Text and image Prompt requests are built only when their response flow is collected,
+on the IO dispatcher and inside the mapped error boundary. Setup failures therefore use
+the same screen error handling as inference failures, without allocating a model client
+for a rejected request. Cancellation and downstream collector errors remain distinct.
+Automated tests inject request-building faults; native SDK image validation and model
+input limits still require device testing.
+
+Speech uses separate operation-scoped clients: status checks, model downloads and
+recognition each close their own client when their operation ends. Stop/release target
+only the active recognition session, so recording cleanup does not close a download's
+client. Clear followed by Record waits for the previous collection's cleanup. The Android
+on-device microphone fallback is Basic-only; Advanced never silently selects that
+fallback. App-side lifecycle and concurrency regressions run on the JVM; native AICore
+concurrency, microphone release and background behavior still require device testing.
+
+Speech download Completed/Failed events end collection before terminal UI state is
+published. An empty stream reports a retryable failure. Check status remains available
+during progress and can reconcile a lost completion callback without downloading again.
+A failed post-download capability refresh is a separate, mode-specific check error;
+its retry does not repeat a completed download. Queued audio waits for the active
+download to finish or be reconciled, even when an older check reported ready.
 
 ---
 
@@ -330,7 +370,9 @@ What is covered:
   keys, leading zeroes, precision), hashes against published digests, JWT decoding,
   Base64, URL codecs and timestamps.
 - **History persistence** — against a real in-memory Room database, including that
-  disabling history means nothing is written at all.
+  disabling history means nothing is written at all. Saved result controls observe
+  their stored row: deleting it or clearing history makes the retained result
+  saveable again without rerunning inference. Ask tracks each answer independently.
 - **Share intent parsing** — including every case that must *not* open an action screen.
 - **`FakeAiEngine`'s own contract**, since every ViewModel test depends on it.
 
@@ -350,20 +392,35 @@ produces.
 
 ## Known limitations
 
-1. **The Compose UI tests have not been executed.** They compile
-   (`./gradlew assembleDebugAndroidTest` passes) but no emulator system image was
-   installed in the environment this was built in. The JVM unit tests all pass.
+1. **Automated tests are not a complete physical-device check.** The JVM suite has
+   one explicitly skipped language-dialog case because of a Robolectric runtime
+   issue; its Android equivalent passed on an API 36 emulator. All 46 current
+   instrumentation tests passed there, including Home/History/gate controls,
+   language search/select/close/detect/swap, native WAV/AAC decoding/pipe cleanup,
+   real bundled OCR/language identification, system-picker open/Back cancellation,
+   and real MainActivity share/recreation, draft, result and tab-state regressions.
+   A separate host test verifies latest pending-share recovery and no dismissed-share
+   replay across genuine OS process kills (not just activity recreation).
+   These tests do not prove real AICore inference, system picker grants, microphone
+   behavior, successful provider URI grants or universal activity/process restoration. See `functional-audit.md`
+   for current counts, coverage, and remaining checks.
 2. **Gemini Nano paths have not been exercised on hardware.** The ML Kit GenAI APIs were
    integrated against the shipped artifacts — every class, method, constant and error code
    used was read from the decompiled AARs rather than assumed — but no device with AICore
    was available, so the success paths are unverified in practice. The unsupported and
    error paths are covered by unit tests.
-3. **GenAI speech recognition is an alpha API** (`1.0.0-alpha1`). Expect it to report
-   unsupported on almost everything today; the app falls back to the platform on-device
+3. **GenAI speech recognition is an alpha API** (`1.0.0-alpha1`). Availability depends
+   on the device and its installed services; the app falls back to the platform on-device
    recognizer, which cannot transcribe files — only live microphone input. The Transcribe
    screen says so rather than hiding the option.
-4. **Audio file transcription therefore needs the GenAI recognizer**, so on most devices
-   today only recording works.
+4. **Audio file transcription needs the GenAI recognizer.** Imported container/encoded
+   audio is decoded locally using Android's available media codecs, downmixed and
+   resampled to raw PCM-16/16 kHz/mono as required by the speech API, then streamed
+   at playback speed through a cancellable in-memory pipe. No input or decoded
+   audio cache file is written. Supported containers/codecs depend on Android;
+   unreadable, empty or unsupported files show an audio-specific error. Converter
+   and lifecycle tests run locally; native WAV/AAC/pipe instrumentation passed on
+   API 36. End-to-end AICore transcription still requires supported-device verification.
 5. **Summarization is bullet points only**, in three languages. See above.
 6. **The Prompt API here has no reliable structured-output mode**, so Explain Error and
    Explain Code request their four sections in the prompt and render whatever the model
@@ -398,7 +455,17 @@ produces.
 
 ## License
 
+Third-party notices are available from **Settings → Open source licenses** and
+**About MindKit → Open source licenses**. Google's
+[OSS licenses integration](https://developers.google.com/android/guides/opensource)
+generates the bundled notice resources from resolved dependencies during builds.
+The debug build supplies its runtime dependency coordinates to the generator because
+AGP does not generate the dependency report used by that plugin for debug variants.
+Release builds use AGP's report. `LicenseViewerTest` checks notice byte ranges and
+the real viewer's list/detail/Back interaction; these tests do not depend on ML Kit.
+
+This does not choose a license for MindKit's own source code:
+
 > _To be chosen._ No license has been applied yet. Note that the ML Kit and Google Play
 > services dependencies carry their own terms — see
-> [ML Kit terms](https://developers.google.com/ml-kit/terms), which the About screen links
-> to.
+> [ML Kit terms](https://developers.google.com/ml-kit/terms).

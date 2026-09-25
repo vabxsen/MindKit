@@ -10,6 +10,7 @@ import com.localai.toolkit.domain.model.AiException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
@@ -62,6 +63,8 @@ class MlKitOcrEngine @Inject constructor(
                 fullText = result.text,
                 blocks = result.textBlocks.map { it.text },
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             throw AiException(e.toAiFailure(), e)
         }

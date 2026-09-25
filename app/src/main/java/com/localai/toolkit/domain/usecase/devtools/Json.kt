@@ -34,12 +34,19 @@ data class JsonError(val message: String, val line: Int, val column: Int) {
 
 class JsonParseException(val error: JsonError) : Exception(error.toString())
 
+const val MAX_JSON_INPUT_CHARS = 100_000
+private const val MAX_JSON_DEPTH = 128
+private const val MAX_JSON_OUTPUT_CHARS = 2_000_000
+
 /**
  * Parses [input] into a [JsonValue].
  *
  * @throws JsonParseException with a positioned [JsonError] when the text is not valid JSON.
  */
 fun parseJson(input: String): JsonValue {
+    if (input.length > MAX_JSON_INPUT_CHARS) {
+        throw JsonParseException(JsonError("input exceeds $MAX_JSON_INPUT_CHARS characters", 1, 1))
+    }
     val parser = JsonParser(input)
     val value = parser.parseValue()
     parser.skipWhitespace()
@@ -48,14 +55,18 @@ fun parseJson(input: String): JsonValue {
 }
 
 /** Formats [value] with [indent] spaces per level. */
-fun formatJson(value: JsonValue, indent: Int = 2): String =
-    StringBuilder().also { writeJson(value, it, indent, depth = 0) }.toString()
+fun formatJson(value: JsonValue, indent: Int = 2): String {
+    require(indent in 0..8) { "Indent must be between 0 and 8 spaces" }
+    return StringBuilder().also { writeJson(value, it, indent, depth = 0); checkOutputSize(it) }.toString()
+}
 
 /** Re-serialises [value] on a single line. */
 fun minifyJson(value: JsonValue): String =
     StringBuilder().also { writeJson(value, it, indent = 0, depth = 0) }.toString()
 
 private fun writeJson(value: JsonValue, out: StringBuilder, indent: Int, depth: Int) {
+    checkOutputSize(out)
+    if (depth > MAX_JSON_DEPTH) throw JsonParseException(JsonError("nesting exceeds $MAX_JSON_DEPTH levels", 1, 1))
     val pretty = indent > 0
     val pad = if (pretty) " ".repeat(indent * (depth + 1)) else ""
     val closePad = if (pretty) " ".repeat(indent * depth) else ""
@@ -102,6 +113,12 @@ private fun writeJson(value: JsonValue, out: StringBuilder, indent: Int, depth: 
     }
 }
 
+private fun checkOutputSize(out: StringBuilder) {
+    if (out.length > MAX_JSON_OUTPUT_CHARS) {
+        throw JsonParseException(JsonError("formatted result exceeds $MAX_JSON_OUTPUT_CHARS characters; reduce input or nesting", 1, 1))
+    }
+}
+
 private fun writeString(value: String, out: StringBuilder) {
     out.append('"')
     value.forEach { char ->
@@ -128,6 +145,7 @@ private fun writeString(value: String, out: StringBuilder) {
 
 private class JsonParser(private val input: String) {
     private var index = 0
+    private var nesting = 0
 
     fun atEnd(): Boolean = index >= input.length
 
@@ -135,19 +153,25 @@ private class JsonParser(private val input: String) {
         skipWhitespace()
         if (atEnd()) fail("unexpected end of input")
         return when (val char = input[index]) {
-            '{' -> parseObject()
-            '[' -> parseArray()
+            '{' -> container { parseObject() }
+            '[' -> container { parseArray() }
             '"' -> JsonValue.JsonString(parseString())
             't' -> parseLiteral("true", JsonValue.JsonBoolean(true))
             'f' -> parseLiteral("false", JsonValue.JsonBoolean(false))
             'n' -> parseLiteral("null", JsonValue.JsonNull)
             else ->
-                if (char == '-' || char.isDigit()) {
+                if (char == '-' || char.isJsonDigit()) {
                     parseNumber()
                 } else {
                     fail("unexpected character '$char'")
                 }
         }
+    }
+
+    private inline fun container(parse: () -> JsonValue): JsonValue {
+        if (nesting >= MAX_JSON_DEPTH) fail("nesting exceeds $MAX_JSON_DEPTH levels")
+        nesting++
+        return try { parse() } finally { nesting-- }
     }
 
     private fun parseObject(): JsonValue {
@@ -230,6 +254,7 @@ private class JsonParser(private val input: String) {
                         'u' -> {
                             if (index + 4 >= input.length) fail("incomplete unicode escape")
                             val hex = input.substring(index + 1, index + 5)
+                            if (hex.any { it !in '0'..'9' && it !in 'a'..'f' && it !in 'A'..'F' }) fail("invalid unicode escape")
                             val code = hex.toIntOrNull(16) ?: fail("invalid unicode escape")
                             builder.append(code.toChar())
                             index += 4
@@ -256,19 +281,19 @@ private class JsonParser(private val input: String) {
         if (peek() == '0') {
             index++
         } else {
-            if (peek()?.isDigit() != true) fail("expected a digit")
-            while (peek()?.isDigit() == true) index++
+            if (peek()?.isJsonDigit() != true) fail("expected a digit")
+            while (peek()?.isJsonDigit() == true) index++
         }
         if (peek() == '.') {
             index++
-            if (peek()?.isDigit() != true) fail("expected a digit after '.'")
-            while (peek()?.isDigit() == true) index++
+            if (peek()?.isJsonDigit() != true) fail("expected a digit after '.'")
+            while (peek()?.isJsonDigit() == true) index++
         }
         if (peek() == 'e' || peek() == 'E') {
             index++
             if (peek() == '+' || peek() == '-') index++
-            if (peek()?.isDigit() != true) fail("expected a digit in the exponent")
-            while (peek()?.isDigit() == true) index++
+            if (peek()?.isJsonDigit() != true) fail("expected a digit in the exponent")
+            while (peek()?.isJsonDigit() == true) index++
         }
         return JsonValue.JsonNumber(input.substring(start, index))
     }
@@ -309,3 +334,5 @@ private class JsonParser(private val input: String) {
 
 private fun Char.isJsonWhitespace(): Boolean =
     this == ' ' || this == '\t' || this == '\n' || this == '\r'
+
+private fun Char.isJsonDigit(): Boolean = this in '0'..'9'

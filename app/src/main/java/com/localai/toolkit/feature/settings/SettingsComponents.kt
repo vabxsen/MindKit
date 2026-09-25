@@ -1,6 +1,7 @@
 package com.localai.toolkit.feature.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.localai.toolkit.core.designsystem.theme.Spacing
@@ -73,7 +75,7 @@ fun SettingsRow(
         modifier = modifier
             .fillMaxWidth()
             .then(
-                if (onClick != null && enabled) Modifier.clickable(onClick = onClick) else Modifier,
+                if (onClick != null) Modifier.clickable(enabled = enabled, onClick = onClick) else Modifier,
             )
             .heightIn(min = Spacing.MinTouchTarget)
             .padding(horizontal = Spacing.L, vertical = Spacing.M)
@@ -119,8 +121,7 @@ fun SettingsSwitchRow(
         title = title,
         summary = summary,
         enabled = enabled,
-        onClick = { onCheckedChange(!checked) },
-        modifier = modifier,
+        modifier = modifier.toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange),
         trailing = {
             Switch(
                 checked = checked,

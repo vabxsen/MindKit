@@ -44,6 +44,9 @@ sealed interface AiFailure {
     /** The supplied image could not be decoded or was rejected by the model. */
     data class InvalidImage(override val technicalDetail: String? = null) : AiFailure
 
+    /** A selected file is unreadable, empty, or unsupported by the device's audio decoder. */
+    data class InvalidAudio(override val technicalDetail: String? = null) : AiFailure
+
     /** Not enough free storage to install the model. */
     data class NotEnoughStorage(override val technicalDetail: String? = null) : AiFailure
 

@@ -1,5 +1,7 @@
 package com.localai.toolkit.feature.ask
 
+import com.localai.toolkit.feature.common.HistorySaveController
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.localai.toolkit.ai.capability.DeviceAiCapabilityManager
@@ -68,12 +70,16 @@ class AskViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(AskUiState())
     val uiState: StateFlow<AskUiState> = _uiState.asStateFlow()
 
+    private val historySave = HistorySaveController(historyRepository, viewModelScope)
+    val saveFeedback = historySave.feedback
+
     val verboseErrors: StateFlow<Boolean> = settingsRepository.settings
         .map { it.verboseErrors }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private var generationJob: Job? = null
     private var nextMessageId = 0L
+    private var generation = 0L
 
     init {
         // Text sent here from another tool or a share becomes the first prompt, ready to
@@ -106,21 +112,29 @@ class AskViewModel @Inject constructor(
             isGenerating = true,
         )
 
+        generate(modelMessage.id, AskRequest(prompt = prompt, history = history))
+    }
+
+    private fun generate(messageId: Long, request: AskRequest) {
+        val activeGeneration = ++generation
         generationJob = viewModelScope.launch {
             try {
-                engine.generateText(AskRequest(prompt = prompt, history = history))
+                engine.generateText(request)
                     .collect { chunk ->
-                        updateMessage(modelMessage.id) {
+                        if (generation != activeGeneration) return@collect
+                        updateMessage(messageId) {
                             it.copy(text = chunk.text, isStreaming = !chunk.isFinal)
                         }
                     }
-                updateMessage(modelMessage.id) { it.copy(isStreaming = false) }
+                if (generation == activeGeneration) updateMessage(messageId) { it.copy(isStreaming = false) }
             } catch (e: AiException) {
-                updateMessage(modelMessage.id) {
+                if (generation == activeGeneration) updateMessage(messageId) {
                     it.copy(isStreaming = false, failure = e.failure)
                 }
             } finally {
-                _uiState.value = _uiState.value.copy(isGenerating = false)
+                if (generation == activeGeneration) {
+                    _uiState.value = _uiState.value.copy(isGenerating = false)
+                }
             }
         }
     }
@@ -132,6 +146,7 @@ class AskViewModel @Inject constructor(
      * the user chose to stop is still useful to them.
      */
     fun onStop() {
+        ++generation
         generationJob?.cancel()
         generationJob = null
         _uiState.value = _uiState.value.copy(
@@ -142,20 +157,32 @@ class AskViewModel @Inject constructor(
         )
     }
 
-    /** Re-runs the last prompt, replacing the answer that failed or disappointed. */
-    fun onRetry() {
-        val messages = _uiState.value.messages
-        val lastUser = messages.lastOrNull { it.role == AskRole.USER } ?: return
-        // Drop the last model turn and everything after it, then resend.
-        val index = messages.indexOf(lastUser)
-        _uiState.value = _uiState.value.copy(
-            messages = messages.take(index),
-            input = lastUser.text,
+    /** Regenerates the selected answer using its original context, preserving later turns and the draft. */
+    fun onRetry(messageId: Long) {
+        val state = _uiState.value
+        if (state.isGenerating) return
+        val index = state.messages.indexOfFirst { it.id == messageId && it.role == AskRole.MODEL }
+        if (index < 0) return
+        val userIndex = state.messages.take(index).indexOfLast { it.role == AskRole.USER }
+        if (userIndex < 0) return
+        val request = AskRequest(
+            prompt = state.messages[userIndex].text,
+            history = state.messages.take(userIndex)
+                .filter { it.failure == null && it.text.isNotBlank() }
+                .map { AskTurn(it.role, it.text) },
         )
-        onSend()
+        _uiState.value = state.copy(
+            messages = state.messages.map {
+                if (it.id == messageId) it.copy(text = "", isStreaming = true, failure = null) else it
+            },
+            isGenerating = true,
+            savedMessageIds = state.savedMessageIds - messageId,
+        )
+        generate(messageId, request)
     }
 
     fun onNewConversation() {
+        ++generation
         generationJob?.cancel()
         generationJob = null
         _uiState.value = AskUiState()
@@ -164,27 +191,25 @@ class AskViewModel @Inject constructor(
     fun onSave(messageId: Long) {
         val state = _uiState.value
         val message = state.messages.firstOrNull { it.id == messageId } ?: return
-        if (message.text.isBlank()) return
+        if (message.text.isBlank() || message.isStreaming || message.role != AskRole.MODEL || messageId in state.savedMessageIds) return
         val prompt = state.messages
             .lastOrNull { it.role == AskRole.USER && it.id < messageId }
             ?.text
             .orEmpty()
 
-        viewModelScope.launch {
-            val saved = historyRepository.save(
-                HistoryItem(
-                    type = HistoryType.ASK,
-                    title = titleOf(prompt.ifBlank { message.text }),
-                    inputPreview = previewOf(prompt),
-                    output = message.text,
-                    createdAtEpochMillis = System.currentTimeMillis(),
-                ),
-            )
-            if (saved != null) {
-                _uiState.value = _uiState.value.copy(
-                    savedMessageIds = _uiState.value.savedMessageIds + messageId,
-                )
-            }
+        historySave.save(
+            item = HistoryItem(
+                type = HistoryType.ASK,
+                title = titleOf(prompt.ifBlank { message.text }),
+                inputPreview = previewOf(prompt),
+                output = message.text,
+                createdAtEpochMillis = System.currentTimeMillis(),
+            ),
+            isCurrent = { _uiState.value.messages.any { it == message } },
+            slot = messageId,
+        ) { saved ->
+            val ids = _uiState.value.savedMessageIds
+            _uiState.value = _uiState.value.copy(savedMessageIds = if (saved) ids + messageId else ids - messageId)
         }
     }
 
@@ -203,6 +228,5 @@ class AskViewModel @Inject constructor(
         // rather than being left open for a backgrounded app.
         generationJob?.cancel()
         gate.release()
-        super.onCleared()
     }
 }

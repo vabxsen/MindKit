@@ -103,6 +103,29 @@ class GateStateTest {
     private fun gate(status: AiCapabilityStatus): GateState =
         gateStateOf(capability(status), ModelDownloadState.Idle)
 
+    @Test fun `failed download overrides a stale downloading status`() {
+        assertThat(gateStateOf(
+            capability(AiCapabilityStatus.DOWNLOADING),
+            ModelDownloadState.Failed(AiFailure.DownloadFailed()),
+        )).isEqualTo(GateState.NEEDS_DOWNLOAD)
+    }
+
+    @Test fun `available and unsupported status still win over a past failure`() {
+        val failed = ModelDownloadState.Failed(AiFailure.DownloadFailed())
+        assertThat(gateStateOf(capability(AiCapabilityStatus.AVAILABLE), failed)).isEqualTo(GateState.READY)
+        assertThat(gateStateOf(capability(AiCapabilityStatus.UNSUPPORTED), failed)).isEqualTo(GateState.UNSUPPORTED)
+    }
+
     private fun capability(status: AiCapabilityStatus) =
         AiCapability(AiTask.SUMMARIZE, status, AiProvider.GEMINI_NANO)
+
+    @Test fun `failed check during local download preserves progress with an error state`() {
+        assertThat(gateStateOf(capability(AiCapabilityStatus.ERROR), ModelDownloadState.InProgress(20, 100)))
+            .isEqualTo(GateState.DOWNLOADING_CHECK_FAILED)
+    }
+
+    @Test fun `temporary check unavailability during download can be checked again`() {
+        assertThat(gateStateOf(capability(AiCapabilityStatus.TEMPORARILY_UNAVAILABLE), ModelDownloadState.Started(100)))
+            .isEqualTo(GateState.DOWNLOADING_CHECK_FAILED)
+    }
 }

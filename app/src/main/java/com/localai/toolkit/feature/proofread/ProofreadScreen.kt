@@ -1,5 +1,10 @@
 package com.localai.toolkit.feature.proofread
 
+import com.localai.toolkit.feature.common.HistorySaveFeedback
+import com.localai.toolkit.feature.common.ObserveHistorySaveFeedback
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,7 +18,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.platform.LocalContext
@@ -33,9 +37,7 @@ import com.localai.toolkit.core.designsystem.theme.Spacing
 import com.localai.toolkit.core.ui.messageRes
 import com.localai.toolkit.core.ui.offersRetry
 import com.localai.toolkit.core.ui.technicalDetailOrNull
-import com.localai.toolkit.core.util.copyToClipboard
-import com.localai.toolkit.core.util.shareText
-import com.localai.toolkit.core.util.shouldShowCopyConfirmation
+import com.localai.toolkit.core.ui.rememberTextActionHandler
 import com.localai.toolkit.domain.model.AiCapability
 import com.localai.toolkit.domain.model.AiCapabilityStatus
 import com.localai.toolkit.domain.model.AiProvider
@@ -44,7 +46,6 @@ import com.localai.toolkit.domain.model.ToolId
 import com.localai.toolkit.feature.common.OptionGroup
 import com.localai.toolkit.feature.common.TextToolScaffold
 import com.localai.toolkit.feature.common.gateStateOf
-import kotlinx.coroutines.launch
 
 @Composable
 fun ProofreadScreen(
@@ -63,6 +64,7 @@ fun ProofreadScreen(
         capability = capability,
         downloadState = downloadState,
         verboseErrors = verboseErrors,
+        saveFeedback = viewModel.saveFeedback,
         onInputChange = viewModel::onInputChange,
         onInputTypeChange = viewModel::onInputTypeChange,
         onProofread = viewModel::onProofread,
@@ -97,11 +99,12 @@ internal fun ProofreadContent(
     onSendTo: (ToolId) -> Unit,
     onNavigateUp: () -> Unit,
     modifier: Modifier = Modifier,
+    saveFeedback: Flow<HistorySaveFeedback> = emptyFlow(),
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val copiedMessage = stringResource(R.string.copied_to_clipboard)
+    ObserveHistorySaveFeedback(saveFeedback, snackbarHostState)
+    val textActions = rememberTextActionHandler(snackbarHostState)
 
     TextToolScaffold(
         title = stringResource(R.string.tool_proofread_title),
@@ -173,22 +176,18 @@ internal fun ProofreadContent(
                     ResultCard(
                         text = state.comparedOriginal,
                         label = stringResource(R.string.proofread_original_label),
-                        onCopy = { context.copyToClipboard("original", state.comparedOriginal) },
-                        onShare = { context.shareText(state.comparedOriginal) },
+                        onCopy = { textActions.copy("original", state.comparedOriginal) },
+                        onShare = { textActions.share(state.comparedOriginal) },
                     )
 
                     ResultCard(
                         text = state.corrected,
                         label = stringResource(R.string.proofread_result_label),
-                        onCopy = {
-                            context.copyToClipboard("proofread", state.corrected)
-                            if (shouldShowCopyConfirmation()) {
-                                scope.launch { snackbarHostState.showSnackbar(copiedMessage) }
-                            }
-                        },
-                        onShare = { context.shareText(state.corrected) },
+                        onCopy = { textActions.copy("proofread", state.corrected) },
+                        onShare = { textActions.share(state.corrected) },
                         onSave = onSave,
                         saved = state.savedToHistory,
+                        saveEnabled = !state.isProofreading,
                         secondaryActions = listOf(
                             ResultAction(stringResource(R.string.tool_rewrite_title)) {
                                 onSendTo(ToolId.REWRITE)

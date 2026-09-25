@@ -1,5 +1,7 @@
 package com.localai.toolkit.feature.summarize
 
+import com.localai.toolkit.feature.common.HistorySaveController
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.localai.toolkit.ai.capability.DeviceAiCapabilityManager
@@ -24,6 +26,7 @@ import com.localai.toolkit.feature.common.GenAiFeatureGate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +38,7 @@ import kotlinx.coroutines.launch
 data class SummarizeUiState(
     val input: String = "",
     val summary: String = "",
+    val summarizedInput: String = "",
     val length: SummaryLength = SummaryLength.MEDIUM,
     val inputType: SummaryInputType = SummaryInputType.ARTICLE,
     val isSummarizing: Boolean = false,
@@ -64,6 +68,9 @@ class SummarizeViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SummarizeUiState())
     val uiState: StateFlow<SummarizeUiState> = _uiState.asStateFlow()
 
+    private val historySave = HistorySaveController(historyRepository, viewModelScope)
+    val saveFeedback = historySave.feedback
+
     val verboseErrors: StateFlow<Boolean> = settingsRepository.settings
         .map { it.verboseErrors }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
@@ -77,15 +84,21 @@ class SummarizeViewModel @Inject constructor(
     }
 
     fun onInputChange(value: String) {
-        _uiState.value = _uiState.value.copy(input = value, savedToHistory = false)
+        if (_uiState.value.input == value) return
+        job?.cancel()
+        _uiState.value = _uiState.value.copy(input = value, isSummarizing = false, failure = null)
     }
 
     fun onLengthChange(length: SummaryLength) {
-        _uiState.value = _uiState.value.copy(length = length)
+        if (_uiState.value.length == length) return
+        job?.cancel()
+        _uiState.value = _uiState.value.copy(length = length, isSummarizing = false, failure = null)
     }
 
     fun onInputTypeChange(type: SummaryInputType) {
-        _uiState.value = _uiState.value.copy(inputType = type)
+        if (_uiState.value.inputType == type) return
+        job?.cancel()
+        _uiState.value = _uiState.value.copy(inputType = type, isSummarizing = false, failure = null)
     }
 
     fun onSummarize() {
@@ -93,7 +106,7 @@ class SummarizeViewModel @Inject constructor(
         if (!state.canSummarize) return
 
         job?.cancel()
-        _uiState.value = state.copy(isSummarizing = true, failure = null, savedToHistory = false)
+        _uiState.value = state.copy(isSummarizing = true, summary = "", failure = null, savedToHistory = false)
 
         job = viewModelScope.launch {
             try {
@@ -104,7 +117,8 @@ class SummarizeViewModel @Inject constructor(
                         inputType = state.inputType,
                     ),
                 )
-                _uiState.value = _uiState.value.copy(isSummarizing = false, summary = summary)
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                _uiState.value = _uiState.value.copy(isSummarizing = false, summary = summary, summarizedInput = state.input)
             } catch (e: AiException) {
                 _uiState.value = _uiState.value.copy(isSummarizing = false, failure = e.failure)
             }
@@ -113,18 +127,21 @@ class SummarizeViewModel @Inject constructor(
 
     fun onSave() {
         val state = _uiState.value
-        if (!state.hasResult) return
-        viewModelScope.launch {
-            val saved = historyRepository.save(
-                HistoryItem(
-                    type = HistoryType.SUMMARY,
-                    title = titleOf(state.input),
-                    inputPreview = previewOf(state.input),
-                    output = state.summary,
-                    createdAtEpochMillis = System.currentTimeMillis(),
-                ),
-            )
-            _uiState.value = _uiState.value.copy(savedToHistory = saved != null)
+        if (!state.hasResult || state.isSummarizing || state.savedToHistory) return
+        historySave.save(
+            item = HistoryItem(
+                type = HistoryType.SUMMARY,
+                title = titleOf(state.summarizedInput),
+                inputPreview = previewOf(state.summarizedInput),
+                output = state.summary,
+                createdAtEpochMillis = System.currentTimeMillis(),
+            ),
+            isCurrent = {
+                _uiState.value.summary == state.summary &&
+                    _uiState.value.summarizedInput == state.summarizedInput && !_uiState.value.isSummarizing
+            },
+        ) { saved ->
+            _uiState.value = _uiState.value.copy(savedToHistory = saved)
         }
     }
 
@@ -149,6 +166,5 @@ class SummarizeViewModel @Inject constructor(
     override fun onCleared() {
         job?.cancel()
         gate.release()
-        super.onCleared()
     }
 }

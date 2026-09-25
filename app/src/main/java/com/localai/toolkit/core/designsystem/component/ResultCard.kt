@@ -48,6 +48,7 @@ fun ResultCard(
     modifier: Modifier = Modifier,
     onSave: (() -> Unit)? = null,
     saved: Boolean = false,
+    saveEnabled: Boolean = true,
     label: String? = null,
     textStyle: TextStyle? = null,
     secondaryActions: List<ResultAction> = emptyList(),
@@ -104,7 +105,7 @@ fun ResultCard(
                     )
                 }
                 if (onSave != null) {
-                    TextButton(onClick = onSave, enabled = !saved) {
+                    TextButton(onClick = onSave, enabled = !saved && saveEnabled) {
                         Icon(
                             imageVector = if (saved) Icons.Outlined.Check else Icons.Outlined.BookmarkAdd,
                             contentDescription = null,

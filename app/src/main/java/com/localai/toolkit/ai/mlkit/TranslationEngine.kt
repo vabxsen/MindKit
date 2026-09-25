@@ -15,6 +15,7 @@ import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
@@ -98,6 +99,8 @@ class MlKitTranslationEngine @Inject constructor(
                 .await()
                 .map { it.language }
                 .toSet()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             throw AiException(e.toAiFailure(), e)
         }
@@ -111,6 +114,8 @@ class MlKitTranslationEngine @Inject constructor(
                     .build()
                 modelManager.download(remoteModel(code), conditions).await()
                 Unit
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 throw AiException(e.toAiFailure(), e)
             }
@@ -126,6 +131,8 @@ class MlKitTranslationEngine @Inject constructor(
                 }
             }
             Unit
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             throw AiException(e.toAiFailure(), e)
         }
@@ -135,6 +142,8 @@ class MlKitTranslationEngine @Inject constructor(
         withContext(ioDispatcher) {
             try {
                 translatorFor(source, target).translate(text).await()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 throw AiException(e.toAiFailure(), e)
             }
@@ -144,6 +153,8 @@ class MlKitTranslationEngine @Inject constructor(
         if (text.isBlank()) return@withContext null
         val tag = try {
             languageIdentifier.identifyLanguage(text).await()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             // A failed guess is not worth surfacing as an error; the user can pick a
             // language themselves.

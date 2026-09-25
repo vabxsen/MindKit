@@ -44,6 +44,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.localai.toolkit.R
 import com.localai.toolkit.core.designsystem.component.EmptyState
+import com.localai.toolkit.core.designsystem.component.ErrorCard
+import com.localai.toolkit.core.designsystem.component.LoadingState
 import com.localai.toolkit.core.designsystem.theme.LocalAiTheme
 import com.localai.toolkit.core.designsystem.theme.Spacing
 import com.localai.toolkit.core.designsystem.theme.FieldNotesTomato
@@ -60,9 +62,13 @@ fun HistoryScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val queryText by viewModel.queryText.collectAsStateWithLifecycle()
+    val deletionState by viewModel.deletionState.collectAsStateWithLifecycle()
 
     HistoryContent(
         state = state,
+        deletionState = deletionState,
+        onRetryLoad = viewModel::refresh,
+        onRetryDelete = viewModel::retryDeletion,
         queryText = queryText,
         onQueryChange = viewModel::onQueryChange,
         onToggleType = viewModel::onToggleType,
@@ -86,6 +92,9 @@ internal fun HistoryContent(
     onDelete: (Long) -> Unit,
     onOpenItem: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    deletionState: HistoryDeletionState = HistoryDeletionState.IDLE,
+    onRetryLoad: () -> Unit = {},
+    onRetryDelete: () -> Unit = {},
 ) {
     var showDeleteAllDialog by remember { mutableStateOf(false) }
 
@@ -121,7 +130,7 @@ internal fun HistoryContent(
                     )
                 }
                 if (state.items.isNotEmpty()) {
-                    IconButton(onClick = { showDeleteAllDialog = true }) {
+                    IconButton(onClick = { showDeleteAllDialog = true }, enabled = deletionState != HistoryDeletionState.RUNNING) {
                         Icon(
                             imageVector = Icons.Outlined.DeleteOutline,
                             contentDescription = stringResource(R.string.action_delete_all),
@@ -154,7 +163,23 @@ internal fun HistoryContent(
                 }
             }
 
+            if (deletionState == HistoryDeletionState.FAILED) {
+                ErrorCard(
+                    message = stringResource(R.string.history_delete_failed),
+                    actionLabel = stringResource(R.string.action_retry),
+                    onAction = onRetryDelete,
+                    modifier = Modifier.padding(Spacing.M),
+                )
+            }
+
             when {
+                state.isLoading -> LoadingState(label = stringResource(R.string.history_loading))
+                state.loadFailed -> ErrorCard(
+                    message = stringResource(R.string.history_load_failed),
+                    actionLabel = stringResource(R.string.action_retry),
+                    onAction = onRetryLoad,
+                    modifier = Modifier.padding(Spacing.M),
+                )
                 state.isEmptyStore -> EmptyState(
                     icon = Icons.Outlined.History,
                     title = stringResource(R.string.history_empty_title),
@@ -184,6 +209,7 @@ internal fun HistoryContent(
                             item = item,
                             onClick = { onOpenItem(item.id) },
                             onDelete = { onDelete(item.id) },
+                            deleteEnabled = deletionState != HistoryDeletionState.RUNNING,
                         )
                     }
                 }
@@ -198,6 +224,7 @@ internal fun HistoryContent(
             text = { Text(stringResource(R.string.history_delete_all_body)) },
             confirmButton = {
                 TextButton(
+                    enabled = deletionState != HistoryDeletionState.RUNNING,
                     onClick = {
                         onDeleteAll()
                         showDeleteAllDialog = false
@@ -218,6 +245,7 @@ private fun HistoryRow(
     item: HistoryItem,
     onClick: () -> Unit,
     onDelete: () -> Unit,
+    deleteEnabled: Boolean,
 ) {
     Card(
         onClick = onClick,
@@ -265,7 +293,7 @@ private fun HistoryRow(
                     modifier = Modifier.padding(top = Spacing.XXS),
                 )
             }
-            IconButton(onClick = onDelete) {
+            IconButton(onClick = onDelete, enabled = deleteEnabled) {
                 Icon(
                     imageVector = Icons.Outlined.DeleteOutline,
                     contentDescription = stringResource(R.string.action_delete),

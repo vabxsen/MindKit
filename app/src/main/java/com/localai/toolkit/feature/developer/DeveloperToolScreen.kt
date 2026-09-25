@@ -1,5 +1,10 @@
 package com.localai.toolkit.feature.developer
 
+import com.localai.toolkit.feature.common.HistorySaveFeedback
+import com.localai.toolkit.feature.common.ObserveHistorySaveFeedback
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,11 +29,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -45,16 +48,13 @@ import com.localai.toolkit.core.designsystem.theme.Spacing
 import com.localai.toolkit.core.ui.messageRes
 import com.localai.toolkit.core.ui.offersRetry
 import com.localai.toolkit.core.ui.technicalDetailOrNull
-import com.localai.toolkit.core.util.copyToClipboard
-import com.localai.toolkit.core.util.shareText
-import com.localai.toolkit.core.util.shouldShowCopyConfirmation
+import com.localai.toolkit.core.ui.rememberTextActionHandler
 import com.localai.toolkit.domain.model.AiCapability
 import com.localai.toolkit.domain.model.AiTask
 import com.localai.toolkit.domain.usecase.devtools.DevTools
 import com.localai.toolkit.feature.common.GenAiGate
 import com.localai.toolkit.feature.common.OptionGroup
 import com.localai.toolkit.feature.common.gateStateOf
-import kotlinx.coroutines.launch
 
 @Composable
 fun DeveloperToolScreen(
@@ -74,6 +74,7 @@ fun DeveloperToolScreen(
         capability = capability,
         downloadState = downloadState,
         verboseErrors = verboseErrors,
+        saveFeedback = viewModel.saveFeedback,
         onInputChange = viewModel::onInputChange,
         onRun = { viewModel.run(tool) },
         onClear = viewModel::onClear,
@@ -112,11 +113,12 @@ internal fun DeveloperToolContent(
     onRetryCheck: () -> Unit,
     onNavigateUp: () -> Unit,
     modifier: Modifier = Modifier,
+    saveFeedback: Flow<HistorySaveFeedback> = emptyFlow(),
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val copiedMessage = stringResource(R.string.copied_to_clipboard)
+    ObserveHistorySaveFeedback(saveFeedback, snackbarHostState)
+    val textActions = rememberTextActionHandler(snackbarHostState)
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -150,13 +152,6 @@ internal fun DeveloperToolContent(
                             } else {
                                 MaterialTheme.typography.bodyLarge
                             },
-                            keyboardOptions = if (tool == DeveloperTool.TIMESTAMP) {
-                                androidx.compose.foundation.text.KeyboardOptions(
-                                    keyboardType = KeyboardType.Number,
-                                )
-                            } else {
-                                androidx.compose.foundation.text.KeyboardOptions.Default
-                            },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = if (tool.usesMonospaceInput()) 200.dp else 120.dp)
@@ -182,8 +177,8 @@ internal fun DeveloperToolContent(
 
                     Button(
                         onClick = onRun,
-                        enabled = state.input.isNotBlank() ||
-                            tool == DeveloperTool.UUID_GENERATOR,
+                        enabled = !state.isGenerating && (state.input.isNotBlank() ||
+                            tool == DeveloperTool.UUID_GENERATOR),
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text(stringResource(tool.actionRes())) }
 
@@ -218,17 +213,11 @@ internal fun DeveloperToolContent(
                             // Developer output is structured text: alignment matters, so
                             // it is rendered monospaced.
                             textStyle = if (state.isOutputMonospace) MonospaceBody else null,
-                            onCopy = {
-                                context.copyToClipboard("developer", state.output)
-                                if (shouldShowCopyConfirmation()) {
-                                    scope.launch {
-                                        snackbarHostState.showSnackbar(copiedMessage)
-                                    }
-                                }
-                            },
-                            onShare = { context.shareText(state.output) },
+                            onCopy = { textActions.copy("developer", state.output.toDisplayOutput(context)) },
+                            onShare = { textActions.share(state.output.toDisplayOutput(context)) },
                             onSave = onSave,
                             saved = state.savedToHistory,
+                            saveEnabled = !state.isGenerating,
                         )
                     }
 
@@ -360,6 +349,7 @@ private fun DirectionChips(decode: Boolean, onChange: (Boolean) -> Unit) {
  * resources; the mapping to what the user reads happens here.
  */
 private fun String.toDisplayMessage(context: android.content.Context): String = when (this) {
+    DeveloperViewModel.INPUT_TOO_LARGE_MARKER -> context.getString(R.string.dev_input_too_large)
     DeveloperViewModel.INVALID_JSON_MARKER -> context.getString(R.string.dev_json_invalid)
     DeveloperViewModel.INVALID_BASE64_MARKER -> context.getString(R.string.dev_base64_invalid)
     DeveloperViewModel.INVALID_URL_MARKER -> context.getString(R.string.dev_url_invalid)

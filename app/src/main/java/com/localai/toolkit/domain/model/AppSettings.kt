@@ -19,4 +19,6 @@ data class AppSettings(
     val verboseErrors: Boolean = false,
     val lastTranslateSource: String? = null,
     val lastTranslateTarget: String? = null,
+    /** Transient read health, never persisted. Unknown preferences must not enable history. */
+    val storageReadFailed: Boolean = false,
 )

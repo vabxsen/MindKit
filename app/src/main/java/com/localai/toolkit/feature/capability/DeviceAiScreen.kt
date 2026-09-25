@@ -30,6 +30,8 @@ import com.localai.toolkit.R
 import com.localai.toolkit.core.designsystem.component.LocalAiTopBar
 import com.localai.toolkit.core.designsystem.component.StatusChip
 import com.localai.toolkit.core.designsystem.component.StatusTone
+import com.localai.toolkit.core.designsystem.component.ErrorCard
+import com.localai.toolkit.core.designsystem.component.LoadingState
 import com.localai.toolkit.core.designsystem.theme.LocalAiTheme
 import com.localai.toolkit.core.designsystem.theme.Spacing
 import com.localai.toolkit.ai.fake.FakeCapabilityManager
@@ -52,11 +54,15 @@ fun DeviceAiScreen(
     viewModel: DeviceAiViewModel = hiltViewModel(),
 ) {
     val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    val refreshFailed by viewModel.refreshFailed.collectAsStateWithLifecycle()
     DeviceAiContent(
         snapshot = snapshot,
         onNavigateUp = onNavigateUp,
         onRefresh = viewModel::refresh,
         modifier = modifier,
+        isRefreshing = isRefreshing,
+        refreshFailed = refreshFailed,
     )
 }
 
@@ -66,6 +72,8 @@ internal fun DeviceAiContent(
     onNavigateUp: () -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
+    isRefreshing: Boolean = false,
+    refreshFailed: Boolean = false,
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -75,7 +83,7 @@ internal fun DeviceAiContent(
                 title = stringResource(R.string.device_ai_title),
                 onNavigateUp = onNavigateUp,
                 actions = {
-                    IconButton(onClick = onRefresh) {
+                    IconButton(onClick = onRefresh, enabled = !isRefreshing && !snapshot.isRefreshing) {
                         Icon(
                             imageVector = Icons.Outlined.Refresh,
                             contentDescription = stringResource(R.string.device_ai_refresh),
@@ -91,6 +99,17 @@ internal fun DeviceAiContent(
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState()),
         ) {
+            if (isRefreshing || snapshot.isRefreshing) {
+                LoadingState(label = stringResource(R.string.loading_checking_availability))
+            }
+            if (refreshFailed) {
+                ErrorCard(
+                    message = stringResource(R.string.gate_check_failed),
+                    actionLabel = stringResource(R.string.action_retry),
+                    onAction = onRefresh,
+                    modifier = Modifier.padding(Spacing.M),
+                )
+            }
             GeminiNanoSummary(snapshot)
 
             Text(
@@ -124,7 +143,7 @@ private fun GeminiNanoSummary(snapshot: DeviceAiSnapshot) {
     // The Prompt capability is the best single proxy for "is Gemini Nano usable here",
     // and it is also where a base model name is most likely to be reported.
     val prompt = snapshot[AiTask.ASK]
-    val supported = snapshot.genAiSupportedAtAll
+    val status = snapshot.nanoSummaryStatus()
 
     Surface(
         modifier = Modifier
@@ -149,10 +168,8 @@ private fun GeminiNanoSummary(snapshot: DeviceAiSnapshot) {
                         .semantics { heading() },
                 )
                 StatusChip(
-                    label = stringResource(
-                        if (supported) R.string.device_ai_available else R.string.device_ai_unavailable,
-                    ),
-                    tone = if (supported) StatusTone.Ready else StatusTone.Unsupported,
+                    label = stringResource(status.labelRes()),
+                    tone = status.tone(),
                 )
             }
 
@@ -172,6 +189,20 @@ private fun GeminiNanoSummary(snapshot: DeviceAiSnapshot) {
             }
         }
     }
+}
+
+/** Readiness, not mere support: a missing/downloading model must not look ready. */
+internal fun DeviceAiSnapshot.nanoSummaryStatus(): AiCapabilityStatus {
+    val statuses = AiTask.entries.filter { it != AiTask.BASIC_TRANSCRIPTION &&
+        it != AiTask.TEXT_RECOGNITION && it != AiTask.TRANSLATION }.map { this[it].status }
+    return listOf(
+        AiCapabilityStatus.AVAILABLE,
+        AiCapabilityStatus.DOWNLOADING,
+        AiCapabilityStatus.DOWNLOADABLE,
+        AiCapabilityStatus.ERROR,
+        AiCapabilityStatus.TEMPORARILY_UNAVAILABLE,
+        AiCapabilityStatus.UNKNOWN,
+    ).firstOrNull { it in statuses } ?: AiCapabilityStatus.UNSUPPORTED
 }
 
 /**

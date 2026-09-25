@@ -1,5 +1,10 @@
 package com.localai.toolkit.feature.summarize
 
+import com.localai.toolkit.feature.common.HistorySaveFeedback
+import com.localai.toolkit.feature.common.ObserveHistorySaveFeedback
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -11,7 +16,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -31,9 +35,7 @@ import com.localai.toolkit.core.designsystem.theme.Spacing
 import com.localai.toolkit.core.ui.messageRes
 import com.localai.toolkit.core.ui.offersRetry
 import com.localai.toolkit.core.ui.technicalDetailOrNull
-import com.localai.toolkit.core.util.copyToClipboard
-import com.localai.toolkit.core.util.shareText
-import com.localai.toolkit.core.util.shouldShowCopyConfirmation
+import com.localai.toolkit.core.ui.rememberTextActionHandler
 import com.localai.toolkit.domain.model.AiCapability
 import com.localai.toolkit.domain.model.AiCapabilityStatus
 import com.localai.toolkit.domain.model.AiProvider
@@ -42,7 +44,6 @@ import com.localai.toolkit.domain.model.ToolId
 import com.localai.toolkit.feature.common.OptionGroup
 import com.localai.toolkit.feature.common.TextToolScaffold
 import com.localai.toolkit.feature.common.gateStateOf
-import kotlinx.coroutines.launch
 
 @Composable
 fun SummarizeScreen(
@@ -61,6 +62,7 @@ fun SummarizeScreen(
         capability = capability,
         downloadState = downloadState,
         verboseErrors = verboseErrors,
+        saveFeedback = viewModel.saveFeedback,
         onInputChange = viewModel::onInputChange,
         onLengthChange = viewModel::onLengthChange,
         onInputTypeChange = viewModel::onInputTypeChange,
@@ -95,11 +97,12 @@ internal fun SummarizeContent(
     onSendTo: (ToolId) -> Unit,
     onNavigateUp: () -> Unit,
     modifier: Modifier = Modifier,
+    saveFeedback: Flow<HistorySaveFeedback> = emptyFlow(),
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val copiedMessage = stringResource(R.string.copied_to_clipboard)
+    ObserveHistorySaveFeedback(saveFeedback, snackbarHostState)
+    val textActions = rememberTextActionHandler(snackbarHostState)
 
     TextToolScaffold(
         title = stringResource(R.string.tool_summarize_title),
@@ -172,15 +175,11 @@ internal fun SummarizeContent(
                 state.hasResult -> ResultCard(
                     text = state.summary,
                     label = stringResource(R.string.summarize_result_label),
-                    onCopy = {
-                        context.copyToClipboard("summary", state.summary)
-                        if (shouldShowCopyConfirmation()) {
-                            scope.launch { snackbarHostState.showSnackbar(copiedMessage) }
-                        }
-                    },
-                    onShare = { context.shareText(state.summary) },
+                    onCopy = { textActions.copy("summary", state.summary) },
+                    onShare = { textActions.share(state.summary) },
                     onSave = onSave,
                     saved = state.savedToHistory,
+                    saveEnabled = !state.isSummarizing,
                     secondaryActions = listOf(
                         ResultAction(stringResource(R.string.tool_translate_title)) {
                             onSendTo(ToolId.TRANSLATE)

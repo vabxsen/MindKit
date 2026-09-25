@@ -34,12 +34,14 @@ import com.localai.toolkit.domain.model.AiTask
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.withContext
@@ -51,8 +53,8 @@ import kotlinx.coroutines.withContext
  * the whole app to run against [com.localai.toolkit.ai.fake.FakeAiEngine] on hardware
  * that has no Gemini Nano at all.
  *
- * Every call funnels its failures through [toAiFailure], so a caller only ever sees an
- * [AiException] carrying a mapped reason - never a vendor error code and never a crash.
+ * Request setup and inference failures are mapped to [AiException]. Coroutine
+ * cancellation and downstream collector failures retain their original semantics.
  */
 @Singleton
 class GeminiNanoAiEngine @Inject constructor(
@@ -61,15 +63,15 @@ class GeminiNanoAiEngine @Inject constructor(
 ) : AiEngine {
 
     override fun generateText(request: AskRequest): Flow<AiStreamChunk> =
-        promptStream(buildPromptRequest(request))
+        promptStream { buildPromptRequest(request) }
 
     override fun analyzeImage(request: AnalyzeImageRequest): Flow<AiStreamChunk> =
-        promptStream(
+        promptStream {
             generateContentRequest(
                 ImagePart(request.bitmap),
                 TextPart(request.prompt),
-            ) {},
-        )
+            ) {}
+        }
 
     /**
      * Shared streaming path for both text and multimodal prompts.
@@ -78,21 +80,28 @@ class GeminiNanoAiEngine @Inject constructor(
      * chunk carries the full text so far, so partials are accumulated here rather than in
      * every collector. The final emission is flagged so the UI can stop showing a caret.
      */
-    private fun promptStream(request: GenerateContentRequest): Flow<AiStreamChunk> = flow {
-        val model = clients.promptModel()
-        val builder = StringBuilder()
+    private fun promptStream(createRequest: () -> GenerateContentRequest): Flow<AiStreamChunk> = flow {
+        // SDK parts/builders can reject inputs before a client is involved. Keep
+        // construction cold, off the UI thread, and inside the same error boundary.
+        val request = createRequest()
+        clients.promptModel().use { lease ->
+            val builder = StringBuilder()
 
-        model.generateContentStream(request).collect { response ->
-            val text = response.candidates.firstOrNull()?.text.orEmpty()
-            if (text.isEmpty()) return@collect
-            builder.append(text)
-            emit(AiStreamChunk(builder.toString(), isFinal = false))
+            lease.client.generateContentStream(request).collect { response ->
+                val text = response.candidates.firstOrNull()?.text.orEmpty()
+                if (text.isEmpty()) return@collect
+                builder.append(text)
+                emit(AiStreamChunk(builder.toString(), isFinal = false))
+            }
+
+            emit(AiStreamChunk(builder.toString(), isFinal = true))
         }
-
-        emit(AiStreamChunk(builder.toString(), isFinal = true))
     }
         .flowOn(ioDispatcher)
-        .catch { throwable -> throw AiException(throwable.toAiFailure(), throwable) }
+        .catch { throwable ->
+            if (throwable is CancellationException) throw throwable
+            throw AiException(throwable.toAiFailure(), throwable)
+        }
 
     /**
      * Folds prior turns into a single prompt.
@@ -121,93 +130,94 @@ class GeminiNanoAiEngine @Inject constructor(
     override suspend fun summarize(request: SummarizeRequest): String =
         withContext(ioDispatcher) {
             runMapped {
-                val summarizer = clients.summarizer(
+                clients.summarizer(
                     inputType = request.inputType.toMlKitInputType(),
                     outputType = request.length.toMlKitOutputType(),
                     language = GenAiLanguages.summarizationLanguage(),
-                )
-                summarizer.prepareInferenceEngine().await()
-                val result = summarizer
-                    .runInference(SummarizationRequest.builder(request.text).build())
-                    .await()
-                result.summary
+                ).use { lease ->
+                    lease.client.prepareInferenceEngine().await()
+                    lease.client.runInference(SummarizationRequest.builder(request.text).build())
+                        .await().summary
+                }
             }
         }
 
     override suspend fun rewrite(request: RewriteRequest): String = withContext(ioDispatcher) {
         runMapped {
-            val rewriter = clients.rewriter(
+            clients.rewriter(
                 outputType = request.style.toMlKitOutputType(),
                 language = GenAiLanguages.rewritingLanguage(),
-            )
-            rewriter.prepareInferenceEngine().await()
-            val result = rewriter
-                .runInference(RewritingRequest.builder(request.text).build())
-                .await()
-            // The API returns ranked suggestions; the first is the one to show, and an
-            // empty list means the model declined rather than failed.
-            result.results.firstOrNull()?.text.orEmpty()
+            ).use { lease ->
+                lease.client.prepareInferenceEngine().await()
+                val result = lease.client
+                    .runInference(RewritingRequest.builder(request.text).build()).await()
+                // Suggestions are ranked; an empty list is a declined result.
+                result.results.firstOrNull()?.text.orEmpty()
+            }
         }
     }
 
     override suspend fun proofread(request: ProofreadRequest): String =
         withContext(ioDispatcher) {
             runMapped {
-                val proofreader = clients.proofreader(
+                clients.proofreader(
                     inputType = request.inputType.toMlKitInputType(),
                     language = GenAiLanguages.proofreadingLanguage(),
-                )
-                proofreader.prepareInferenceEngine().await()
-                val result = proofreader
-                    .runInference(ProofreadingRequest.builder(request.text).build())
-                    .await()
-                result.results.firstOrNull()?.text.orEmpty()
+                ).use { lease ->
+                    lease.client.prepareInferenceEngine().await()
+                    val result = lease.client
+                        .runInference(ProofreadingRequest.builder(request.text).build()).await()
+                    result.results.firstOrNull()?.text.orEmpty()
+                }
             }
         }
 
     override suspend fun describeImage(request: DescribeImageRequest): String =
         withContext(ioDispatcher) {
             runMapped {
-                val describer = clients.imageDescriber()
-                describer.prepareInferenceEngine().await()
-                describer
-                    .runInference(ImageDescriptionRequest.builder(request.bitmap).build())
-                    .await()
-                    .description
+                clients.imageDescriber().use { lease ->
+                    lease.client.prepareInferenceEngine().await()
+                    lease.client.runInference(ImageDescriptionRequest.builder(request.bitmap).build())
+                        .await().description
+                }
             }
         }
 
-    override fun downloadModel(task: AiTask): Flow<ModelDownloadState> = when (task) {
+    override fun downloadModel(task: AiTask): Flow<ModelDownloadState> =
+        mappedModelDownload { downloadForTask(task) }.flowOn(ioDispatcher)
+
+    private fun downloadForTask(task: AiTask): Flow<ModelDownloadState> = when (task) {
         // The Prompt API exposes a Flow of DownloadStatus directly.
-        AiTask.ASK, AiTask.IMAGE_QUESTION -> clients.promptModel().download()
-            .map { it.toDownloadState() }
-            .catch { throwable -> emit(ModelDownloadState.Failed(throwable.toAiFailure())) }
-            .flowOn(ioDispatcher)
+        AiTask.ASK, AiTask.IMAGE_QUESTION -> flow {
+            clients.promptModel().use { lease ->
+                emitAll(lease.client.download().map { it.toDownloadState() })
+            }
+        }
 
         AiTask.SUMMARIZE -> featureDownload { callback ->
             clients.summarizer(
                 inputType = SummarizerOptions.InputType.ARTICLE,
                 outputType = SummarizerOptions.OutputType.TWO_BULLETS,
                 language = GenAiLanguages.summarizationLanguage(),
-            ).downloadFeature(callback).await()
+            ).use { it.client.downloadFeature(callback).await() }
         }
 
         AiTask.REWRITE -> featureDownload { callback ->
             clients.rewriter(
                 outputType = RewriterOptions.OutputType.REPHRASE,
                 language = GenAiLanguages.rewritingLanguage(),
-            ).downloadFeature(callback).await()
+            ).use { it.client.downloadFeature(callback).await() }
         }
 
         AiTask.PROOFREAD -> featureDownload { callback ->
             clients.proofreader(
                 inputType = ProofreaderOptions.InputType.KEYBOARD,
                 language = GenAiLanguages.proofreadingLanguage(),
-            ).downloadFeature(callback).await()
+            ).use { it.client.downloadFeature(callback).await() }
         }
 
         AiTask.IMAGE_DESCRIPTION -> featureDownload { callback ->
-            clients.imageDescriber().downloadFeature(callback).await()
+            clients.imageDescriber().use { it.client.downloadFeature(callback).await() }
         }
 
         // Not GenAI-backed, so there is nothing for this engine to download.
@@ -261,6 +271,8 @@ class GeminiNanoAiEngine @Inject constructor(
             // a terminal callback, so the flow still has to finish rather than leaving
             // the progress UI spinning.
             if (!terminated) trySend(ModelDownloadState.Completed)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             if (!terminated) trySend(ModelDownloadState.Failed(e.toAiFailure()))
         }
@@ -276,9 +288,19 @@ class GeminiNanoAiEngine @Inject constructor(
     /** Runs [block], converting any ML Kit failure into a mapped [AiException]. */
     private inline fun <T> runMapped(block: () -> T): T = try {
         block()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
     } catch (e: Exception) {
         throw AiException(e.toAiFailure(), e)
     }
+}
+
+/** Includes synchronous SDK/client creation in the cold download error boundary. */
+internal fun mappedModelDownload(create: () -> Flow<ModelDownloadState>): Flow<ModelDownloadState> = flow {
+    emitAll(create())
+}.catch { error ->
+    if (error is CancellationException) throw error
+    emit(ModelDownloadState.Failed((error as? AiException)?.failure ?: error.toAiFailure()))
 }
 
 internal fun DownloadStatus.toDownloadState(): ModelDownloadState = when (this) {

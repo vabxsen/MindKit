@@ -51,6 +51,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.localai.toolkit.R
 import com.localai.toolkit.core.designsystem.component.StatusChip
 import com.localai.toolkit.core.designsystem.component.StatusTone
+import com.localai.toolkit.core.designsystem.component.ErrorCard
+import com.localai.toolkit.core.designsystem.component.LoadingState
 import com.localai.toolkit.core.designsystem.theme.FieldNotesCanvas
 import com.localai.toolkit.core.designsystem.theme.FieldNotesMustard
 import com.localai.toolkit.core.designsystem.theme.FieldNotesMustardLight
@@ -82,6 +84,8 @@ fun HomeScreen(
         onOpenTool = onOpenTool,
         onOpenHistoryItem = onOpenHistoryItem,
         modifier = modifier,
+        onRetryHistory = viewModel::retryHistory,
+        onRetryCapabilities = viewModel::refresh,
     )
 }
 
@@ -91,6 +95,8 @@ internal fun HomeContent(
     onOpenTool: (String) -> Unit,
     modifier: Modifier = Modifier,
     onOpenHistoryItem: (Long) -> Unit = {},
+    onRetryHistory: () -> Unit = {},
+    onRetryCapabilities: () -> Unit = {},
 ) {
     Box(
         modifier = modifier
@@ -109,6 +115,17 @@ internal fun HomeContent(
             verticalArrangement = Arrangement.spacedBy(Spacing.M),
         ) {
         item { WorkspaceHeader(readiness = state.readiness) }
+
+        if (state.capabilityCheckFailed) {
+            item {
+                ErrorCard(
+                    message = stringResource(R.string.gate_check_failed),
+                    actionLabel = stringResource(R.string.action_retry),
+                    onAction = onRetryCapabilities,
+                    modifier = Modifier.padding(horizontal = Spacing.ScreenHorizontal),
+                )
+            }
+        }
 
         item {
             NewTaskCard(
@@ -161,7 +178,16 @@ internal fun HomeContent(
         }
 
         item {
-            RecentPanel(
+            if (state.historyLoading) {
+                LoadingState(label = stringResource(R.string.history_loading))
+            } else if (state.historyFailed) {
+                ErrorCard(
+                    message = stringResource(R.string.history_load_failed),
+                    actionLabel = stringResource(R.string.action_retry),
+                    onAction = onRetryHistory,
+                    modifier = Modifier.padding(horizontal = Spacing.ScreenHorizontal),
+                )
+            } else RecentPanel(
                 items = state.recentItems,
                 onOpenItem = onOpenHistoryItem,
                 modifier = Modifier.padding(horizontal = Spacing.ScreenHorizontal),
@@ -523,10 +549,11 @@ private fun DevicePanel(readiness: DeviceReadiness, modifier: Modifier = Modifie
             Column(modifier = Modifier.padding(start = Spacing.M)) {
                 Text(
                     text = stringResource(
-                        if (readiness == DeviceReadiness.READY) {
-                            R.string.home_models_ready
-                        } else {
-                            R.string.home_models_checking
+                        when (readiness) {
+                            DeviceReadiness.READY -> R.string.home_models_ready
+                            DeviceReadiness.CHECKING -> R.string.home_models_checking
+                            DeviceReadiness.MODEL_REQUIRED -> R.string.home_status_model_required
+                            DeviceReadiness.LIMITED -> R.string.home_status_limited
                         },
                     ),
                     style = MaterialTheme.typography.titleMedium,

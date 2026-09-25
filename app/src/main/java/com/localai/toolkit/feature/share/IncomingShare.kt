@@ -2,7 +2,9 @@ package com.localai.toolkit.feature.share
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
 import androidx.core.content.IntentCompat
+import androidx.core.net.toUri
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,8 +21,9 @@ sealed interface SharedContent {
 /**
  * Holds the share the app was launched with until a screen consumes it.
  *
- * In memory only. Shared content is not written to disk anywhere along this path: it goes
- * from the intent, to the action screen, to whichever tool the user picks.
+ * The store is in memory. MainActivity also saves the unconsumed payload in Android's
+ * activity saved state so the latest share survives process death. It is not added to
+ * app history or a separate content cache.
  */
 @Singleton
 class IncomingShareStore @Inject constructor() {
@@ -39,6 +42,26 @@ class IncomingShareStore @Inject constructor() {
     }
 }
 
+/** Save only the normalized pending payload, not arbitrary extras from another app. */
+internal fun SharedContent.toSavedState(): Bundle = Bundle().apply {
+    when (val content = this@toSavedState) {
+        is SharedContent.Text -> { putString("kind", "text"); putString("value", content.value) }
+        is SharedContent.Image -> { putString("kind", "image"); putString("value", content.uri.toString()) }
+        is SharedContent.Audio -> { putString("kind", "audio"); putString("value", content.uri.toString()) }
+    }
+}
+
+/** URI grants are still owned by Android; saving a URI does not create a permission. */
+internal fun Bundle.toSharedContent(): SharedContent? {
+    val value = getString("value")?.takeIf { it.isNotBlank() } ?: return null
+    return when (getString("kind")) {
+        "text" -> SharedContent.Text(value)
+        "image" -> SharedContent.Image(value.toUri())
+        "audio" -> SharedContent.Audio(value.toUri())
+        else -> null
+    }
+}
+
 /**
  * Extracts shareable content from an incoming intent.
  *
@@ -52,10 +75,10 @@ fun Intent.toSharedContent(): SharedContent? {
 
     return when {
         mimeType.startsWith("text/") -> {
-            val text = getStringExtra(Intent.EXTRA_TEXT)
+            val text = getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.takeIf { it.isNotBlank() }
                 // Some apps share a subject with no body; a subject alone is still text
                 // worth acting on.
-                ?: getStringExtra(Intent.EXTRA_SUBJECT)
+                ?: getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString()
             text?.takeIf { it.isNotBlank() }?.let { SharedContent.Text(it) }
         }
 
@@ -75,3 +98,4 @@ fun Intent.toSharedContent(): SharedContent? {
  */
 private fun Intent.streamUri(): Uri? =
     IntentCompat.getParcelableExtra(this, Intent.EXTRA_STREAM, Uri::class.java)
+        ?: clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri

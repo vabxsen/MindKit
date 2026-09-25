@@ -41,6 +41,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.localai.toolkit.R
 import com.localai.toolkit.core.designsystem.component.LoadingState
+import com.localai.toolkit.core.designsystem.component.ErrorCard
 import com.localai.toolkit.core.designsystem.theme.LocalAiTheme
 import com.localai.toolkit.core.designsystem.theme.Spacing
 import com.localai.toolkit.core.designsystem.theme.FieldNotesCanvas
@@ -72,10 +73,14 @@ fun OnboardingScreen(
 ) {
     val stage by viewModel.stage.collectAsStateWithLifecycle()
     val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
+    val isCompleting by viewModel.isCompleting.collectAsStateWithLifecycle()
+    val finishFailed by viewModel.finishFailed.collectAsStateWithLifecycle()
 
     OnboardingContent(
         stage = stage,
         snapshot = snapshot,
+        isCompleting = isCompleting,
+        finishFailed = finishFailed,
         onCheckDevice = viewModel::checkDevice,
         onFinish = { viewModel.complete(onFinished) },
         modifier = modifier,
@@ -89,15 +94,28 @@ internal fun OnboardingContent(
     onCheckDevice: () -> Unit,
     onFinish: () -> Unit,
     modifier: Modifier = Modifier,
+    isCompleting: Boolean = false,
+    finishFailed: Boolean = false,
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
+        bottomBar = {
+            if (finishFailed) {
+                ErrorCard(
+                    message = stringResource(R.string.onboarding_finish_failed),
+                    actionLabel = stringResource(R.string.action_retry),
+                    onAction = onFinish,
+                    modifier = Modifier.padding(Spacing.M),
+                )
+            }
+        },
     ) { padding ->
         when (stage) {
             OnboardingStage.INTRO -> IntroPages(
                 onCheckDevice = onCheckDevice,
                 onSkip = onFinish,
+                enabled = !isCompleting,
                 modifier = Modifier.padding(padding),
             )
 
@@ -107,14 +125,34 @@ internal fun OnboardingContent(
                     .fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
-                LoadingState(label = stringResource(R.string.loading_checking_availability))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    LoadingState(label = stringResource(R.string.loading_checking_availability))
+                    TextButton(onClick = onFinish, enabled = !isCompleting) {
+                        Text(stringResource(R.string.action_skip))
+                    }
+                }
             }
 
             OnboardingStage.RESULTS -> ResultsPage(
                 snapshot = snapshot,
                 onFinish = onFinish,
+                enabled = !isCompleting,
                 modifier = Modifier.padding(padding),
             )
+
+            OnboardingStage.ERROR -> Column(
+                modifier = Modifier.padding(padding).padding(Spacing.M),
+                verticalArrangement = Arrangement.spacedBy(Spacing.M),
+            ) {
+                ErrorCard(
+                    message = stringResource(R.string.gate_check_failed),
+                    actionLabel = stringResource(R.string.action_retry).takeIf { !isCompleting },
+                    onAction = onCheckDevice.takeIf { !isCompleting },
+                )
+                TextButton(onClick = onFinish, enabled = !isCompleting) {
+                    Text(stringResource(R.string.action_skip))
+                }
+            }
         }
     }
 }
@@ -123,6 +161,7 @@ internal fun OnboardingContent(
 private fun IntroPages(
     onCheckDevice: () -> Unit,
     onSkip: () -> Unit,
+    enabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val pagerState = rememberPagerState(pageCount = { pages.size })
@@ -136,7 +175,7 @@ private fun IntroPages(
                 .padding(horizontal = Spacing.S, vertical = Spacing.S),
             horizontalArrangement = Arrangement.End,
         ) {
-            TextButton(onClick = onSkip) { Text(stringResource(R.string.action_skip)) }
+            TextButton(onClick = onSkip, enabled = enabled) { Text(stringResource(R.string.action_skip)) }
         }
 
         HorizontalPager(
@@ -205,6 +244,7 @@ private fun IntroPages(
         }
 
         Button(
+            enabled = enabled && !pagerState.isScrollInProgress,
             onClick = {
                 if (isLastPage) {
                     onCheckDevice()
@@ -232,6 +272,7 @@ private fun IntroPages(
 private fun ResultsPage(
     snapshot: DeviceAiSnapshot,
     onFinish: () -> Unit,
+    enabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -257,6 +298,7 @@ private fun ResultsPage(
 
         Button(
             onClick = onFinish,
+            enabled = enabled,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = Spacing.ScreenHorizontal)

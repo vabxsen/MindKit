@@ -44,10 +44,9 @@ interface AiEngine {
     fun downloadModel(task: AiTask): Flow<ModelDownloadState>
 
     /**
-     * Releases any inference resources held for [task], or for every task when null.
-     *
-     * Called when a feature screen leaves the composition so that a backgrounded app is
-     * not holding an AICore session open.
+     * Retires cached resources for [task], or every task when null.
+     * Callers cancel their own operations separately. Other active users keep their
+     * resources until they finish; releasing one screen must not interrupt another.
      */
     fun release(task: AiTask? = null)
 }

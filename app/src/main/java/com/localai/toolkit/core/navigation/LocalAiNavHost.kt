@@ -89,8 +89,8 @@ fun LocalAiNavHost(
                     }
                 },
                 onCancel = {
-                    navController.navigate(Destination.HOME) {
-                        popUpTo(Destination.SHARE_ROUTER) { inclusive = true }
+                    if (!navController.popBackStack()) {
+                        navController.navigate(Destination.HOME) { launchSingleTop = true }
                     }
                 },
             )

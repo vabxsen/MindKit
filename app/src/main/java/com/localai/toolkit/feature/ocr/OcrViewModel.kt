@@ -1,6 +1,7 @@
 package com.localai.toolkit.feature.ocr
 
-import android.content.Context
+import com.localai.toolkit.feature.common.HistorySaveController
+
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -8,10 +9,9 @@ import androidx.lifecycle.viewModelScope
 import com.localai.toolkit.ai.mlkit.OcrEngine
 import com.localai.toolkit.core.navigation.HandoffPayload
 import com.localai.toolkit.core.navigation.ToolHandoff
-import com.localai.toolkit.core.util.decodeDownsampledBitmap
+import com.localai.toolkit.core.util.ImageLoader
 import com.localai.toolkit.core.util.previewOf
 import com.localai.toolkit.core.util.titleOf
-import com.localai.toolkit.di.IoDispatcher
 import com.localai.toolkit.domain.model.AiException
 import com.localai.toolkit.domain.model.AiFailure
 import com.localai.toolkit.domain.model.HistoryItem
@@ -20,10 +20,10 @@ import com.localai.toolkit.domain.model.ToolId
 import com.localai.toolkit.domain.repository.HistoryRepository
 import com.localai.toolkit.domain.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -31,7 +31,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 data class OcrUiState(
     val imageUri: Uri? = null,
@@ -62,16 +61,18 @@ data class OcrUiState(
 
 @HiltViewModel
 class OcrViewModel @Inject constructor(
-    @param:ApplicationContext private val context: Context,
+    private val imageLoader: ImageLoader,
     private val ocrEngine: OcrEngine,
     private val historyRepository: HistoryRepository,
     private val toolHandoff: ToolHandoff,
     settingsRepository: SettingsRepository,
-    @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(OcrUiState())
     val uiState: StateFlow<OcrUiState> = _uiState.asStateFlow()
+
+    private val historySave = HistorySaveController(historyRepository, viewModelScope)
+    val saveFeedback = historySave.feedback
 
     val verboseErrors: StateFlow<Boolean> = settingsRepository.settings
         .map { it.verboseErrors }
@@ -86,7 +87,6 @@ class OcrViewModel @Inject constructor(
 
     fun onImageSelected(uri: Uri) {
         recognitionJob?.cancel()
-        _uiState.value.preview?.recycle()
         _uiState.value = OcrUiState(imageUri = uri, isRecognizing = true)
 
         recognitionJob = viewModelScope.launch {
@@ -94,14 +94,12 @@ class OcrViewModel @Inject constructor(
                 // Decoding and recognition both happen off the main thread, and the
                 // recognition bitmap is downsampled first so a 48 MP photo cannot
                 // exhaust memory.
-                val preview = withContext(ioDispatcher) {
-                    context.decodeDownsampledBitmap(uri, OcrUiState.PREVIEW_MAX_DIMENSION)
-                }
+                val preview = imageLoader.load(uri, OcrUiState.PREVIEW_MAX_DIMENSION)
+                currentCoroutineContext().ensureActive()
                 _uiState.value = _uiState.value.copy(preview = preview)
 
-                val bitmap = withContext(ioDispatcher) {
-                    context.decodeDownsampledBitmap(uri, OcrUiState.RECOGNITION_MAX_DIMENSION)
-                }
+                val bitmap = imageLoader.load(uri, OcrUiState.RECOGNITION_MAX_DIMENSION)
+                currentCoroutineContext().ensureActive()
                 if (bitmap == null) {
                     _uiState.value = _uiState.value.copy(
                         isRecognizing = false,
@@ -110,13 +108,11 @@ class OcrViewModel @Inject constructor(
                     return@launch
                 }
 
-                val recognized = try {
-                    ocrEngine.recognize(bitmap)
-                } finally {
-                    // The recognition bitmap is dropped immediately: only the extracted
-                    // text is kept, and only if the user saves it.
-                    bitmap.recycle()
-                }
+                // Native ML Kit work can outlive cancellation of Task.await(). Let
+                // reference ownership govern bitmap lifetime instead of recycling
+                // memory the recognizer (or Compose preview) may still be reading.
+                val recognized = ocrEngine.recognize(bitmap)
+                currentCoroutineContext().ensureActive()
 
                 _uiState.value = _uiState.value.copy(
                     isRecognizing = false,
@@ -124,6 +120,7 @@ class OcrViewModel @Inject constructor(
                     noTextDetected = recognized.isEmpty,
                 )
             } catch (e: AiException) {
+                currentCoroutineContext().ensureActive()
                 _uiState.value = _uiState.value.copy(isRecognizing = false, failure = e.failure)
             }
         }
@@ -135,25 +132,25 @@ class OcrViewModel @Inject constructor(
 
     fun onClear() {
         recognitionJob?.cancel()
-        _uiState.value.preview?.recycle()
         _uiState.value = OcrUiState()
     }
 
     fun onSave() {
-        val text = _uiState.value.extractedText
-        if (text.isBlank()) return
-        viewModelScope.launch {
-            val saved = historyRepository.save(
-                HistoryItem(
-                    type = HistoryType.OCR,
-                    title = titleOf(text),
-                    // The image itself is never stored - only a note that one was used.
-                    inputPreview = previewOf(text),
-                    output = text,
-                    createdAtEpochMillis = System.currentTimeMillis(),
-                ),
-            )
-            _uiState.value = _uiState.value.copy(savedToHistory = saved != null)
+        val state = _uiState.value
+        val text = state.extractedText
+        if (!state.hasResult || state.isRecognizing || state.savedToHistory) return
+        historySave.save(
+            item = HistoryItem(
+                type = HistoryType.OCR,
+                title = titleOf(text),
+                // The image itself is never stored - only a note that one was used.
+                inputPreview = previewOf(text),
+                output = text,
+                createdAtEpochMillis = System.currentTimeMillis(),
+            ),
+            isCurrent = { _uiState.value.extractedText == state.extractedText && _uiState.value.imageUri == state.imageUri && !_uiState.value.isRecognizing },
+        ) { saved ->
+            _uiState.value = _uiState.value.copy(savedToHistory = saved)
         }
     }
 
@@ -166,9 +163,8 @@ class OcrViewModel @Inject constructor(
 
     override fun onCleared() {
         // Cancels in-flight recognition when the screen goes away, so inference does not
-        // continue for a screen nobody is looking at, and releases the preview bitmap.
+        // continue for a screen nobody is looking at. Compose/native references may
+        // outlive this owner, so bitmap memory is reclaimed normally, not recycled.
         recognitionJob?.cancel()
-        _uiState.value.preview?.recycle()
-        super.onCleared()
     }
 }

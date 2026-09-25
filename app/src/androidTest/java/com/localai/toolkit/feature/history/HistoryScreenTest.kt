@@ -4,7 +4,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelectable
 import com.google.common.truth.Truth.assertThat
 import com.localai.toolkit.core.designsystem.theme.LocalAiTheme
 import com.localai.toolkit.domain.model.HistoryItem
@@ -102,7 +104,7 @@ class HistoryScreenTest {
             onDeleteAll = { deletedAll = true },
         )
 
-        composeRule.onNodeWithText("Delete all").performClick()
+        composeRule.onNodeWithContentDescription("Delete all").performClick()
 
         // The dialog is up; nothing has been deleted yet.
         assertThat(deletedAll).isFalse()
@@ -117,9 +119,8 @@ class HistoryScreenTest {
             onDeleteAll = { deletedAll = true },
         )
 
+        composeRule.onNodeWithContentDescription("Delete all").performClick()
         composeRule.onNodeWithText("Delete all").performClick()
-        // The confirm button carries the same label; the last match is the dialog's.
-        composeRule.onAllNodesWithTextDeleteAll().onLast().performClick()
 
         assertThat(deletedAll).isTrue()
     }
@@ -128,7 +129,7 @@ class HistoryScreenTest {
     fun typeFilterChipsAreOffered() {
         setContent(HistoryUiState(isLoading = false, items = sampleItems))
 
-        composeRule.onNodeWithText("Summary").assertIsDisplayed()
+        composeRule.onNode(hasText("Summary") and isSelectable()).assertIsDisplayed()
     }
 
     private fun setContent(
@@ -153,6 +154,3 @@ class HistoryScreenTest {
         }
     }
 }
-
-private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.onAllNodesWithTextDeleteAll() =
-    onAllNodes(androidx.compose.ui.test.hasText("Delete all"))

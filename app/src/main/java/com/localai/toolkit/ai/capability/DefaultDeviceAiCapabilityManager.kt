@@ -1,8 +1,6 @@
 package com.localai.toolkit.ai.capability
 
 import android.content.Context
-import android.os.Build
-import android.speech.SpeechRecognizer
 import com.google.mlkit.genai.imagedescription.ImageDescriber
 import com.google.mlkit.genai.proofreading.Proofreader
 import com.google.mlkit.genai.proofreading.ProofreaderOptions
@@ -27,13 +25,9 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.guava.await
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 
 /**
  * Resolves what this device can actually do, at runtime.
@@ -43,7 +37,7 @@ import kotlinx.coroutines.withContext
  * which feature models have been pushed to it - none of which a model string predicts.
  * Every GenAI answer here comes from that feature's own status call.
  *
- * Results are cached for [CACHE_DURATION_MILLIS] so that opening Home, then a tool, then
+ * Results are cached for one minute so that opening Home, then a tool, then
  * the capability screen does not re-probe AICore three times.
  */
 @Singleton
@@ -54,39 +48,12 @@ class DefaultDeviceAiCapabilityManager @Inject constructor(
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : DeviceAiCapabilityManager {
 
-    private val state = MutableStateFlow(DeviceAiSnapshot())
-    override val snapshot: StateFlow<DeviceAiSnapshot> = state.asStateFlow()
+    private val cache = CapabilitySnapshotCache(ioDispatcher, ::resolve)
+    override val snapshot: StateFlow<DeviceAiSnapshot> = cache.snapshot
 
-    private val refreshLock = Mutex()
+    override suspend fun refresh(force: Boolean) = cache.refresh(force)
 
-    override suspend fun refresh(force: Boolean) {
-        refreshLock.withLock {
-            val last = state.value.lastCheckedAtEpochMillis
-            val fresh = last != null &&
-                System.currentTimeMillis() - last < CACHE_DURATION_MILLIS
-            if (!force && fresh) return
-
-            state.value = state.value.copy(isRefreshing = true)
-            val resolved = withContext(ioDispatcher) {
-                AiTask.entries.associateWith { task -> resolve(task) }
-            }
-            state.value = DeviceAiSnapshot(
-                capabilities = resolved,
-                isRefreshing = false,
-                lastCheckedAtEpochMillis = System.currentTimeMillis(),
-            )
-        }
-    }
-
-    override suspend fun refresh(task: AiTask) {
-        val resolved = withContext(ioDispatcher) { resolve(task) }
-        refreshLock.withLock {
-            state.value = state.value.copy(
-                capabilities = state.value.capabilities + (task to resolved),
-                lastCheckedAtEpochMillis = System.currentTimeMillis(),
-            )
-        }
-    }
+    override suspend fun refresh(task: AiTask) = cache.refresh(task)
 
     private suspend fun resolve(task: AiTask): AiCapability = when (task) {
         AiTask.ASK, AiTask.IMAGE_QUESTION -> resolvePrompt(task)
@@ -107,19 +74,21 @@ class DefaultDeviceAiCapabilityManager @Inject constructor(
      * no separate multimodal availability call to consult.
      */
     private suspend fun resolvePrompt(task: AiTask): AiCapability = genAi(task) {
-        val model = clients.promptModel()
-        val status = model.checkStatus().toCapabilityStatus()
+        clients.promptModel().use { lease ->
+            val model = lease.client
+            val status = model.checkStatus().toCapabilityStatus()
 
-        AiCapability(
-            task = task,
-            status = status,
-            provider = AiProvider.GEMINI_NANO,
-            baseModelName = if (status == AiCapabilityStatus.AVAILABLE) {
-                runCatching { model.getBaseModelName() }.getOrNull()
-            } else {
-                null
-            },
-        )
+            AiCapability(
+                task = task,
+                status = status,
+                provider = AiProvider.GEMINI_NANO,
+                baseModelName = if (status == AiCapabilityStatus.AVAILABLE) {
+                    optionalModelName { model.getBaseModelName() }
+                } else {
+                    null
+                },
+            )
+        }
     }
 
     private suspend fun resolveSummarization(): AiCapability = genAi(AiTask.SUMMARIZE) {
@@ -133,18 +102,19 @@ class DefaultDeviceAiCapabilityManager @Inject constructor(
                 detail = "Device language not supported by the summarization model",
             )
         }
-        val client = clients.summarizer(
+        clients.summarizer(
             inputType = SummarizerOptions.InputType.ARTICLE,
             outputType = SummarizerOptions.OutputType.TWO_BULLETS,
             language = GenAiLanguages.summarizationLanguage(),
-        )
-        val status = client.checkFeatureStatus().await().toCapabilityStatus()
-        AiCapability(
-            task = AiTask.SUMMARIZE,
-            status = status,
-            provider = AiProvider.GEMINI_NANO,
-            baseModelName = client.baseModelNameOrNull(status),
-        )
+        ).use { lease ->
+            val status = lease.client.checkFeatureStatus().await().toCapabilityStatus()
+            AiCapability(
+                task = AiTask.SUMMARIZE,
+                status = status,
+                provider = AiProvider.GEMINI_NANO,
+                baseModelName = lease.client.baseModelNameOrNull(status),
+            )
+        }
     }
 
     private suspend fun resolveRewriting(): AiCapability = genAi(AiTask.REWRITE) {
@@ -156,17 +126,18 @@ class DefaultDeviceAiCapabilityManager @Inject constructor(
                 detail = "Device language not supported by the rewriting model",
             )
         }
-        val client = clients.rewriter(
+        clients.rewriter(
             outputType = RewriterOptions.OutputType.REPHRASE,
             language = GenAiLanguages.rewritingLanguage(),
-        )
-        val status = client.checkFeatureStatus().await().toCapabilityStatus()
-        AiCapability(
-            task = AiTask.REWRITE,
-            status = status,
-            provider = AiProvider.GEMINI_NANO,
-            baseModelName = client.baseModelNameOrNull(status),
-        )
+        ).use { lease ->
+            val status = lease.client.checkFeatureStatus().await().toCapabilityStatus()
+            AiCapability(
+                task = AiTask.REWRITE,
+                status = status,
+                provider = AiProvider.GEMINI_NANO,
+                baseModelName = lease.client.baseModelNameOrNull(status),
+            )
+        }
     }
 
     private suspend fun resolveProofreading(): AiCapability = genAi(AiTask.PROOFREAD) {
@@ -178,29 +149,31 @@ class DefaultDeviceAiCapabilityManager @Inject constructor(
                 detail = "Device language not supported by the proofreading model",
             )
         }
-        val client = clients.proofreader(
+        clients.proofreader(
             inputType = ProofreaderOptions.InputType.KEYBOARD,
             language = GenAiLanguages.proofreadingLanguage(),
-        )
-        val status = client.checkFeatureStatus().await().toCapabilityStatus()
-        AiCapability(
-            task = AiTask.PROOFREAD,
-            status = status,
-            provider = AiProvider.GEMINI_NANO,
-            baseModelName = client.baseModelNameOrNull(status),
-        )
+        ).use { lease ->
+            val status = lease.client.checkFeatureStatus().await().toCapabilityStatus()
+            AiCapability(
+                task = AiTask.PROOFREAD,
+                status = status,
+                provider = AiProvider.GEMINI_NANO,
+                baseModelName = lease.client.baseModelNameOrNull(status),
+            )
+        }
     }
 
     private suspend fun resolveImageDescription(): AiCapability =
         genAi(AiTask.IMAGE_DESCRIPTION) {
-            val client = clients.imageDescriber()
-            val status = client.checkFeatureStatus().await().toCapabilityStatus()
-            AiCapability(
-                task = AiTask.IMAGE_DESCRIPTION,
-                status = status,
-                provider = AiProvider.GEMINI_NANO,
-                baseModelName = client.baseModelNameOrNull(status),
-            )
+            clients.imageDescriber().use { lease ->
+                val status = lease.client.checkFeatureStatus().await().toCapabilityStatus()
+                AiCapability(
+                    task = AiTask.IMAGE_DESCRIPTION,
+                    status = status,
+                    provider = AiProvider.GEMINI_NANO,
+                    baseModelName = lease.client.baseModelNameOrNull(status),
+                )
+            }
         }
 
     /**
@@ -225,34 +198,14 @@ class DefaultDeviceAiCapabilityManager @Inject constructor(
      * screen never misattributes which engine would actually run.
      */
     private suspend fun resolveBasicTranscription(): AiCapability {
-        val mlKitStatus = transcriptionEngine.status(TranscriptionMode.BASIC)
-        if (mlKitStatus == AiCapabilityStatus.AVAILABLE ||
-            mlKitStatus == AiCapabilityStatus.DOWNLOADABLE ||
-            mlKitStatus == AiCapabilityStatus.DOWNLOADING
-        ) {
-            return AiCapability(
-                task = AiTask.BASIC_TRANSCRIPTION,
-                status = mlKitStatus,
-                provider = AiProvider.GEMINI_NANO,
-            )
-        }
-
-        // On-device recognition is only queryable from API 31; older devices fall back to
-        // the general availability check.
-        val platformAvailable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
-        } else {
-            SpeechRecognizer.isRecognitionAvailable(context)
-        }
+        val status = transcriptionEngine.status(TranscriptionMode.BASIC)
         return AiCapability(
             task = AiTask.BASIC_TRANSCRIPTION,
-            status = if (platformAvailable) {
-                AiCapabilityStatus.AVAILABLE
-            } else {
-                AiCapabilityStatus.UNSUPPORTED
-            },
-            provider = AiProvider.ANDROID_PLATFORM,
-            detail = if (platformAvailable) null else "No on-device speech recognition service",
+            status = status,
+            provider = transcriptionEngine.provider(TranscriptionMode.BASIC),
+            detail = if (status == AiCapabilityStatus.UNSUPPORTED) {
+                "No on-device speech recognition service"
+            } else null,
         )
     }
 
@@ -290,6 +243,8 @@ class DefaultDeviceAiCapabilityManager @Inject constructor(
         block: () -> AiCapability,
     ): AiCapability = try {
         block()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
     } catch (e: Exception) {
         val failure = e.toAiFailure()
         AiCapability(
@@ -304,10 +259,6 @@ class DefaultDeviceAiCapabilityManager @Inject constructor(
         )
     }
 
-    private companion object {
-        /** Long enough to cover a browsing session, short enough to notice a download. */
-        const val CACHE_DURATION_MILLIS = 60_000L
-    }
 }
 
 /**
@@ -319,7 +270,7 @@ class DefaultDeviceAiCapabilityManager @Inject constructor(
 private suspend fun Summarizer.baseModelNameOrNull(
     status: AiCapabilityStatus,
 ): String? = if (status == AiCapabilityStatus.AVAILABLE) {
-    runCatching { getBaseModelName().await() }.getOrNull()
+    optionalModelName { getBaseModelName().await() }
 } else {
     null
 }
@@ -327,7 +278,7 @@ private suspend fun Summarizer.baseModelNameOrNull(
 private suspend fun Rewriter.baseModelNameOrNull(
     status: AiCapabilityStatus,
 ): String? = if (status == AiCapabilityStatus.AVAILABLE) {
-    runCatching { getBaseModelName().await() }.getOrNull()
+    optionalModelName { getBaseModelName().await() }
 } else {
     null
 }
@@ -335,7 +286,7 @@ private suspend fun Rewriter.baseModelNameOrNull(
 private suspend fun Proofreader.baseModelNameOrNull(
     status: AiCapabilityStatus,
 ): String? = if (status == AiCapabilityStatus.AVAILABLE) {
-    runCatching { getBaseModelName().await() }.getOrNull()
+    optionalModelName { getBaseModelName().await() }
 } else {
     null
 }
@@ -343,7 +294,16 @@ private suspend fun Proofreader.baseModelNameOrNull(
 private suspend fun ImageDescriber.baseModelNameOrNull(
     status: AiCapabilityStatus,
 ): String? = if (status == AiCapabilityStatus.AVAILABLE) {
-    runCatching { getBaseModelName().await() }.getOrNull()
+    optionalModelName { getBaseModelName().await() }
 } else {
+    null
+}
+
+/** A model name is optional; cancellation of its operation is not an optional failure. */
+private suspend fun optionalModelName(block: suspend () -> String): String? = try {
+    block()
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (_: Exception) {
     null
 }

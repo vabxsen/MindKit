@@ -15,6 +15,15 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 
 /** The overall device readiness shown as a chip at the top of Home. */
 enum class DeviceReadiness { CHECKING, READY, MODEL_REQUIRED, LIMITED }
@@ -32,32 +41,77 @@ data class HomeUiState(
     val readiness: DeviceReadiness = DeviceReadiness.CHECKING,
     val tools: List<ToolAvailability> = emptyList(),
     val recentItems: List<HistoryItem> = emptyList(),
+    val historyLoading: Boolean = false,
+    val historyFailed: Boolean = false,
+    val capabilityCheckFailed: Boolean = false,
 )
 
+private data class RecentHistoryState(
+    val items: List<HistoryItem> = emptyList(),
+    val loading: Boolean = false,
+    val failed: Boolean = false,
+)
+
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val capabilityManager: DeviceAiCapabilityManager,
     historyRepository: HistoryRepository,
 ) : ViewModel() {
+    private val historyRefresh = MutableStateFlow(0)
+    private val capabilityCheckFailed = MutableStateFlow(false)
+    private var checking = false
+    private val history = historyRefresh.flatMapLatest {
+        flow { emitAll(historyRepository.observe()) }
+            .map { RecentHistoryState(items = it.take(2)) }
+            .onStart { emit(RecentHistoryState(loading = true)) }
+            .catch { emit(RecentHistoryState(failed = true)) }
+    }
 
     val uiState: StateFlow<HomeUiState> = combine(
         capabilityManager.snapshot,
-        historyRepository.observe(),
-    ) { snapshot, history -> snapshot.toUiState(history.take(2)) }
+        history,
+        capabilityCheckFailed,
+    ) { snapshot, recent, checkFailed ->
+        snapshot.toUiState(recent.items).copy(
+            historyLoading = recent.loading,
+            historyFailed = recent.failed,
+            capabilityCheckFailed = checkFailed,
+        )
+    }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = HomeUiState(),
+            initialValue = DeviceAiSnapshot().toUiState().copy(historyLoading = true),
         )
 
     init {
         // Availability is resolved when Home first needs it rather than at process start,
         // so a cold launch does not wait on AICore.
-        viewModelScope.launch { capabilityManager.refresh(force = false) }
+        refreshCapabilities(force = false)
     }
 
     fun refresh() {
-        viewModelScope.launch { capabilityManager.refresh(force = true) }
+        refreshCapabilities(force = true)
+    }
+
+    fun retryHistory() { historyRefresh.value++ }
+
+    private fun refreshCapabilities(force: Boolean) {
+        if (checking) return
+        checking = true
+        capabilityCheckFailed.value = false
+        viewModelScope.launch {
+            try {
+                capabilityManager.refresh(force)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                capabilityCheckFailed.value = true
+            } finally {
+                checking = false
+            }
+        }
     }
 }
 

@@ -1,5 +1,7 @@
 package com.localai.toolkit.feature.proofread
 
+import com.localai.toolkit.feature.common.HistorySaveController
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.localai.toolkit.ai.capability.DeviceAiCapabilityManager
@@ -23,6 +25,7 @@ import com.localai.toolkit.feature.common.GenAiFeatureGate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -64,6 +67,9 @@ class ProofreadViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ProofreadUiState())
     val uiState: StateFlow<ProofreadUiState> = _uiState.asStateFlow()
 
+    private val historySave = HistorySaveController(historyRepository, viewModelScope)
+    val saveFeedback = historySave.feedback
+
     val verboseErrors: StateFlow<Boolean> = settingsRepository.settings
         .map { it.verboseErrors }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
@@ -77,15 +83,21 @@ class ProofreadViewModel @Inject constructor(
     }
 
     fun onInputChange(value: String) {
+        if (_uiState.value.input == value) return
+        job?.cancel()
         _uiState.value = _uiState.value.copy(
             input = value,
-            savedToHistory = false,
+            corrected = if (_uiState.value.noChangesSuggested) "" else _uiState.value.corrected,
+            isProofreading = false,
+            failure = null,
             noChangesSuggested = false,
         )
     }
 
     fun onInputTypeChange(type: ProofreadInputType) {
-        _uiState.value = _uiState.value.copy(inputType = type)
+        if (_uiState.value.inputType == type) return
+        job?.cancel()
+        _uiState.value = _uiState.value.copy(inputType = type, isProofreading = false, failure = null)
     }
 
     fun onProofread() {
@@ -95,6 +107,7 @@ class ProofreadViewModel @Inject constructor(
         job?.cancel()
         _uiState.value = state.copy(
             isProofreading = true,
+            corrected = "",
             failure = null,
             savedToHistory = false,
             noChangesSuggested = false,
@@ -105,6 +118,7 @@ class ProofreadViewModel @Inject constructor(
                 val result = engine.proofread(
                     ProofreadRequest(text = state.input, inputType = state.inputType),
                 )
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 // A model that returns the input unchanged has found nothing to fix; that
                 // is a useful answer, not an empty result.
                 val unchanged = result.isBlank() || result.trim() == state.input.trim()
@@ -129,18 +143,18 @@ class ProofreadViewModel @Inject constructor(
 
     fun onSave() {
         val state = _uiState.value
-        if (!state.hasResult) return
-        viewModelScope.launch {
-            val saved = historyRepository.save(
-                HistoryItem(
-                    type = HistoryType.PROOFREAD,
-                    title = titleOf(state.comparedOriginal),
-                    inputPreview = previewOf(state.comparedOriginal),
-                    output = state.corrected,
-                    createdAtEpochMillis = System.currentTimeMillis(),
-                ),
-            )
-            _uiState.value = _uiState.value.copy(savedToHistory = saved != null)
+        if (!state.hasResult || state.isProofreading || state.savedToHistory) return
+        historySave.save(
+            item = HistoryItem(
+                type = HistoryType.PROOFREAD,
+                title = titleOf(state.comparedOriginal),
+                inputPreview = previewOf(state.comparedOriginal),
+                output = state.corrected,
+                createdAtEpochMillis = System.currentTimeMillis(),
+            ),
+            isCurrent = { _uiState.value.corrected == state.corrected && _uiState.value.comparedOriginal == state.comparedOriginal && !_uiState.value.isProofreading },
+        ) { saved ->
+            _uiState.value = _uiState.value.copy(savedToHistory = saved)
         }
     }
 
@@ -162,6 +176,5 @@ class ProofreadViewModel @Inject constructor(
     override fun onCleared() {
         job?.cancel()
         gate.release()
-        super.onCleared()
     }
 }

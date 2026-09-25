@@ -1,5 +1,10 @@
 package com.localai.toolkit.feature.transcription
 
+import com.localai.toolkit.feature.common.HistorySaveFeedback
+import com.localai.toolkit.feature.common.ObserveHistorySaveFeedback
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,13 +31,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleStartEffect
 import com.localai.toolkit.R
 import com.localai.toolkit.ai.engine.ModelDownloadState
 import com.localai.toolkit.ai.gemini.TranscriptionMode
@@ -49,14 +54,11 @@ import com.localai.toolkit.core.designsystem.theme.Spacing
 import com.localai.toolkit.core.ui.messageRes
 import com.localai.toolkit.core.ui.offersRetry
 import com.localai.toolkit.core.ui.technicalDetailOrNull
-import com.localai.toolkit.core.util.copyToClipboard
-import com.localai.toolkit.core.util.shareText
-import com.localai.toolkit.core.util.shouldShowCopyConfirmation
+import com.localai.toolkit.core.ui.rememberTextActionHandler
 import com.localai.toolkit.domain.model.AiCapabilityStatus
 import com.localai.toolkit.domain.model.AiProvider
 import com.localai.toolkit.domain.model.ToolId
 import com.localai.toolkit.feature.capability.labelRes
-import kotlinx.coroutines.launch
 
 @Composable
 fun TranscriptionScreen(
@@ -67,17 +69,21 @@ fun TranscriptionScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val verboseErrors by viewModel.verboseErrors.collectAsStateWithLifecycle()
+    LifecycleStartEffect(viewModel) {
+        onStopOrDispose { viewModel.onScreenHidden() }
+    }
 
     TranscriptionContent(
         state = state,
         verboseErrors = verboseErrors,
+        saveFeedback = viewModel.saveFeedback,
         onModeChange = viewModel::onModeChange,
         onStartRecording = viewModel::onStartRecording,
         onStopRecording = viewModel::onStopRecording,
         onFileSelected = viewModel::onFileSelected,
         onMicrophoneDenied = viewModel::onMicrophoneDenied,
         onDownload = viewModel::onDownloadModel,
-        onRetryCheck = viewModel::refreshAvailability,
+        onRetryCheck = viewModel::onRetry,
         onSave = viewModel::onSave,
         onClear = viewModel::onClear,
         onSendTo = { tool ->
@@ -105,11 +111,12 @@ internal fun TranscriptionContent(
     onSendTo: (ToolId) -> Unit,
     onNavigateUp: () -> Unit,
     modifier: Modifier = Modifier,
+    saveFeedback: Flow<HistorySaveFeedback> = emptyFlow(),
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val copiedMessage = stringResource(R.string.copied_to_clipboard)
+    ObserveHistorySaveFeedback(saveFeedback, snackbarHostState)
+    val textActions = rememberTextActionHandler(snackbarHostState)
 
     // Requested at the moment the user taps record, never on screen entry.
     val micPermission = rememberLauncherForActivityResult(
@@ -175,6 +182,53 @@ internal fun TranscriptionContent(
             )
 
             when {
+                // Availability/download updates must never take away the escape
+                // action for a recognition operation that already owns the screen.
+                state.isRecording -> {
+                    LoadingState(label = stringResource(R.string.transcribe_listening))
+                    Button(onClick = onStopRecording, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.transcribe_stop))
+                    }
+                }
+
+                state.isTranscribingFile -> {
+                    LoadingState(label = stringResource(R.string.loading_transcribing))
+                    Text(
+                        text = stringResource(R.string.transcribe_file_pacing),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                }
+
+                state.downloadState is ModelDownloadState.Started ||
+                    state.downloadState is ModelDownloadState.InProgress -> {
+                    LoadingState(
+                        label = stringResource(R.string.loading_downloading_model),
+                        progress = (state.downloadState as? ModelDownloadState.InProgress)?.fraction,
+                    )
+                    OutlinedButton(onClick = onRetryCheck, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.action_check_status))
+                    }
+                }
+
+                state.currentStatus == AiCapabilityStatus.ERROR ||
+                    state.currentStatus == AiCapabilityStatus.TEMPORARILY_UNAVAILABLE -> ErrorCard(
+                    message = stringResource(R.string.gate_check_failed),
+                    actionLabel = stringResource(R.string.action_retry),
+                    onAction = onRetryCheck,
+                )
+
+                state.currentStatus == AiCapabilityStatus.DOWNLOADING &&
+                    state.downloadState !is ModelDownloadState.Failed -> {
+                    LoadingState(label = stringResource(R.string.loading_downloading_model))
+                    OutlinedButton(onClick = onRetryCheck, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.action_check_status))
+                    }
+                }
+
                 state.currentStatus == AiCapabilityStatus.UNKNOWN -> LoadingState(
                     label = stringResource(R.string.loading_checking_availability),
                 )
@@ -185,61 +239,40 @@ internal fun TranscriptionContent(
                     description = stringResource(R.string.transcribe_unsupported_body),
                 )
 
-                state.currentStatus == AiCapabilityStatus.DOWNLOADABLE -> {
-                    val progress =
-                        (state.downloadState as? ModelDownloadState.InProgress)?.fraction
-                    if (state.downloadState is ModelDownloadState.InProgress ||
-                        state.downloadState is ModelDownloadState.Started
-                    ) {
-                        LoadingState(
-                            label = stringResource(R.string.loading_downloading_model),
-                            progress = progress,
+                state.currentStatus == AiCapabilityStatus.DOWNLOADABLE ||
+                    state.downloadState is ModelDownloadState.Failed -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(Spacing.M)) {
+                        Text(
+                            text = stringResource(R.string.gate_download_body),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(Spacing.M)) {
-                            Text(
-                                text = stringResource(R.string.gate_download_body),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Button(onClick = onDownload, modifier = Modifier.fillMaxWidth()) {
-                                Text(stringResource(R.string.action_download_model))
-                            }
+                        Button(onClick = onDownload, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.action_download_model))
                         }
                     }
                 }
 
                 else -> {
-                    if (state.isRecording) {
-                        LoadingState(label = stringResource(R.string.transcribe_listening))
-                        Button(onClick = onStopRecording, modifier = Modifier.fillMaxWidth()) {
-                            Text(stringResource(R.string.transcribe_stop))
-                        }
-                    } else {
-                        Button(
-                            onClick = { micPermission.launch(Manifest.permission.RECORD_AUDIO) },
+                    Button(
+                        onClick = { micPermission.launch(Manifest.permission.RECORD_AUDIO) },
+                        enabled = state.canStart,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.action_record)) }
+
+                    if (state.supportsFileInput) {
+                        OutlinedButton(
+                            onClick = { pickAudio.launch(arrayOf("audio/*")) },
                             enabled = state.canStart,
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text(stringResource(R.string.action_record)) }
-
-                        if (state.supportsFileInput) {
-                            OutlinedButton(
-                                onClick = { pickAudio.launch(arrayOf("audio/*")) },
-                                enabled = state.canStart,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text(stringResource(R.string.action_choose_audio)) }
-                        } else {
-                            // Said plainly rather than hiding the option with no reason.
-                            Text(
-                                text = stringResource(R.string.transcribe_no_file_support),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-
-                    if (state.isTranscribingFile) {
-                        LoadingState(label = stringResource(R.string.loading_transcribing))
+                        ) { Text(stringResource(R.string.action_choose_audio)) }
+                    } else {
+                        // Said plainly rather than hiding the option with no reason.
+                        Text(
+                            text = stringResource(R.string.transcribe_no_file_support),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
@@ -248,12 +281,23 @@ internal fun TranscriptionContent(
                 ErrorCard(
                     message = stringResource(failure.messageRes()),
                     technicalDetail = failure.technicalDetailOrNull(context, verboseErrors),
-                    actionLabel = if (failure.offersRetry) {
+                    actionLabel = if (failure.offersRetry && !state.isBusy) {
                         stringResource(R.string.action_retry)
                     } else {
                         null
                     },
-                    onAction = onRetryCheck.takeIf { failure.offersRetry },
+                    onAction = onRetryCheck.takeIf { failure.offersRetry && !state.isBusy },
+                )
+            }
+
+            if (state.failure == null && state.downloadCheckFailure != null) {
+                ErrorCard(
+                    message = stringResource(R.string.gate_check_failed),
+                    technicalDetail = state.downloadCheckFailure.technicalDetailOrNull(context, verboseErrors),
+                    actionLabel = if (!state.isBusy && !state.isCheckingDownload) {
+                        stringResource(R.string.action_check_status)
+                    } else null,
+                    onAction = onRetryCheck.takeIf { !state.isBusy && !state.isCheckingDownload },
                 )
             }
 
@@ -261,15 +305,11 @@ internal fun TranscriptionContent(
                 ResultCard(
                     text = state.transcript,
                     label = stringResource(R.string.transcribe_result_label),
-                    onCopy = {
-                        context.copyToClipboard("transcript", state.transcript)
-                        if (shouldShowCopyConfirmation()) {
-                            scope.launch { snackbarHostState.showSnackbar(copiedMessage) }
-                        }
-                    },
-                    onShare = { context.shareText(state.transcript) },
+                    onCopy = { textActions.copy("transcript", state.transcript) },
+                    onShare = { textActions.share(state.transcript) },
                     onSave = onSave,
                     saved = state.savedToHistory,
+                    saveEnabled = !state.isBusy,
                     secondaryActions = listOf(
                         ResultAction(stringResource(R.string.tool_summarize_title)) {
                             onSendTo(ToolId.SUMMARIZE)
