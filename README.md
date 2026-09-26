@@ -319,7 +319,7 @@ Requirements:
 
 - **JDK 17** to build, and **JDK 21** available for the unit tests (see Testing).
 - Android SDK with **platform 37** and build-tools 36.
-- No API keys, no `google-services.json`, no signing config. Nothing to configure.
+- No API keys or `google-services.json`. Debug builds need no signing setup.
 
 ```bash
 ./gradlew assembleDebug
@@ -331,6 +331,24 @@ The debug APK lands in `app/build/outputs/apk/debug/`.
 ./gradlew assembleRelease   # minified + resource-shrunk, unsigned
 ./gradlew bundleRelease     # Android App Bundle
 ```
+
+### Release APK signing (Windows)
+
+The v1.0.0 release uses a dedicated 4096-bit RSA key in `signing/mindkit-release.jks`.
+The password is stored locally in `signing/release-password.dpapi`, protected by the
+Windows account that created it. Both files and generated `dist/` APKs are Git-ignored.
+They are not in this repository or in GitHub Releases. To build and sign a future
+version after updating `versionCode` and `versionName`, run:
+
+```powershell
+.\scripts\sign-release.ps1 -Version 1.0.1 -Build
+```
+
+The script checks the package/version and ZIP alignment, signs with the same key,
+and verifies the resulting APK. Back up the keystore **and** its password before
+moving computers or resetting Windows. Run `scripts/copy-release-password.ps1` to
+copy the password for storage in a password manager; the DPAPI file alone cannot be
+decrypted by a different Windows account.
 
 ### A note on size
 

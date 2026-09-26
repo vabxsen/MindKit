@@ -18,6 +18,8 @@ captures/
 *.keystore
 keystore.properties
 secrets.properties
+/signing/
+/dist/
 
 # Untrusted, locally cached research output.
 .firecrawl/
