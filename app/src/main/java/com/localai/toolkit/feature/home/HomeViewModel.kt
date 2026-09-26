@@ -46,6 +46,42 @@ data class HomeUiState(
     val capabilityCheckFailed: Boolean = false,
 )
 
+/** Routes for the prominent media shortcuts, resolved against the same snapshot as tool rows. */
+internal data class NewTaskTargets(
+    val text: ToolId?,
+    val image: ToolId?,
+    val audio: ToolId?,
+) {
+    val primary: ToolId? get() = text ?: image ?: audio
+}
+
+internal fun HomeUiState.newTaskTargets(): NewTaskTargets {
+    fun status(id: ToolId): AiCapabilityStatus? = tools.firstOrNull { it.toolId == id }?.status
+
+    fun choose(primary: ToolId, localFallback: ToolId): ToolId? {
+        val primaryStatus = status(primary)
+        val localStatus = status(localFallback)
+        // The fallback works without Gemini Nano. Even while the device check is
+        // pending, choosing it avoids an eventual unsupported-AI dead end.
+        return when {
+            primaryStatus == AiCapabilityStatus.AVAILABLE -> primary
+            localStatus != null && localStatus != AiCapabilityStatus.UNSUPPORTED -> localFallback
+            primaryStatus == AiCapabilityStatus.DOWNLOADABLE ||
+                primaryStatus == AiCapabilityStatus.DOWNLOADING -> primary
+            else -> null
+        }
+    }
+
+    val audioStatus = status(ToolId.TRANSCRIBE)
+    return NewTaskTargets(
+        text = choose(ToolId.ASK, ToolId.TRANSLATE),
+        image = choose(ToolId.IMAGE, ToolId.OCR),
+        audio = if (audioStatus == AiCapabilityStatus.AVAILABLE ||
+            audioStatus == AiCapabilityStatus.DOWNLOADABLE ||
+            audioStatus == AiCapabilityStatus.DOWNLOADING) ToolId.TRANSCRIBE else null,
+    )
+}
+
 private data class RecentHistoryState(
     val items: List<HistoryItem> = emptyList(),
     val loading: Boolean = false,

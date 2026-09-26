@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
@@ -39,6 +42,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
@@ -128,10 +132,10 @@ internal fun HomeContent(
         }
 
         item {
+            val targets = state.newTaskTargets()
             NewTaskCard(
-                onText = { onOpenTool(ToolCatalog[ToolId.ASK].route) },
-                onImage = { onOpenTool(ToolCatalog[ToolId.IMAGE].route) },
-                onAudio = { onOpenTool(ToolCatalog[ToolId.TRANSCRIBE].route) },
+                targets = targets,
+                onOpenTool = { onOpenTool(ToolCatalog[it].route) },
                 modifier = Modifier.padding(horizontal = Spacing.ScreenHorizontal),
             )
         }
@@ -207,80 +211,42 @@ internal fun HomeContent(
 @Composable
 private fun WorkspaceHeader(readiness: DeviceReadiness) {
     Surface(color = FieldNotesCanvas) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(272.dp)
-                .padding(horizontal = Spacing.ScreenHorizontal, vertical = Spacing.XL),
-        ) {
+        if (LocalDensity.current.fontScale >= 1.6f) {
+            // Let enlarged text determine the header height instead of overlapping the
+            // decorative hero and the absolutely positioned title in the compact layout.
             Column(
-                modifier = Modifier.align(Alignment.TopStart),
-                verticalArrangement = Arrangement.spacedBy(Spacing.XS),
+                modifier = Modifier.fillMaxWidth().padding(
+                    horizontal = Spacing.ScreenHorizontal,
+                    vertical = Spacing.XL,
+                ),
+                verticalArrangement = Arrangement.spacedBy(Spacing.L),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primary,
-                        shape = RoundedCornerShape(8.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Hub,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.padding(7.dp).size(22.dp),
-                        )
-                    }
-                    Text(
-                        text = stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.padding(start = Spacing.M),
-                    )
-                }
-                Text(
-                    text = stringResource(R.string.home_field_notes_tagline).uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = Spacing.XS),
-                )
+                WorkspaceBrand()
+                WorkspaceSummary(readiness, Modifier.fillMaxWidth())
             }
-
-            Image(
-                painter = painterResource(R.drawable.field_notes_hero),
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
+        } else {
+            Box(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 38.dp)
-                    .width(188.dp)
-                    .height(126.dp),
-            )
-
-            Column(
-                modifier = Modifier.align(Alignment.BottomStart).widthIn(max = 330.dp),
-                verticalArrangement = Arrangement.spacedBy(Spacing.S),
+                    .fillMaxWidth()
+                    .height(272.dp)
+                    .padding(horizontal = Spacing.ScreenHorizontal, vertical = Spacing.XL),
             ) {
-                Text(
-                    text = stringResource(R.string.home_workspace_title),
-                    style = MaterialTheme.typography.displaySmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.semantics { heading() },
+                WorkspaceBrand(modifier = Modifier.align(Alignment.TopStart))
+
+                Image(
+                    painter = painterResource(R.drawable.field_notes_hero),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 38.dp)
+                        .width(188.dp)
+                        .height(126.dp),
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .background(FieldNotesSage, CircleShape),
-                    )
-                    Text(
-                        text = stringResource(R.string.home_workspace_body),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = Spacing.S),
-                    )
-                }
-                StatusChip(
-                    label = stringResource(readiness.labelRes()),
-                    tone = readiness.tone(),
-                    contentDescription = stringResource(readiness.descriptionRes()),
+
+                WorkspaceSummary(
+                    readiness = readiness,
+                    modifier = Modifier.align(Alignment.BottomStart).widthIn(max = 330.dp),
                 )
             }
         }
@@ -288,14 +254,86 @@ private fun WorkspaceHeader(readiness: DeviceReadiness) {
 }
 
 @Composable
+private fun WorkspaceBrand(modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Spacing.XS)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(8.dp)) {
+                Icon(
+                    imageVector = Icons.Outlined.Hub,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.padding(7.dp).size(22.dp),
+                )
+            }
+            Text(
+                text = stringResource(R.string.app_name),
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(start = Spacing.M),
+            )
+        }
+        Text(
+            text = stringResource(R.string.home_field_notes_tagline).uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = Spacing.XS),
+        )
+    }
+}
+
+@Composable
+private fun WorkspaceSummary(readiness: DeviceReadiness, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Spacing.S)) {
+        Text(
+            text = stringResource(R.string.home_workspace_title),
+            style = MaterialTheme.typography.displaySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.semantics { heading() },
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(8.dp).background(FieldNotesSage, CircleShape))
+            Text(
+                text = stringResource(R.string.home_workspace_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = Spacing.S),
+            )
+        }
+        StatusChip(
+            label = stringResource(readiness.labelRes()),
+            tone = readiness.tone(),
+            contentDescription = stringResource(readiness.descriptionRes()),
+        )
+    }
+}
+
+@Composable
 private fun NewTaskCard(
-    onText: () -> Unit,
-    onImage: () -> Unit,
-    onAudio: () -> Unit,
+    targets: NewTaskTargets,
+    onOpenTool: (ToolId) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val shortcuts = buildList {
+        targets.text?.let { target ->
+            add(TaskShortcut(
+                Icons.Outlined.Description,
+                if (target == ToolId.ASK) R.string.home_add_text else R.string.home_translate_text,
+                target,
+            ))
+        }
+        targets.image?.let { target ->
+            add(TaskShortcut(
+                Icons.Outlined.AddPhotoAlternate,
+                if (target == ToolId.IMAGE) R.string.home_add_image else R.string.home_extract_text,
+                target,
+            ))
+        }
+        targets.audio?.let { target ->
+            add(TaskShortcut(Icons.Outlined.GraphicEq, R.string.home_add_audio, target))
+        }
+    }
     Surface(
-        onClick = onText,
+        onClick = { targets.primary?.let(onOpenTool) },
+        enabled = targets.primary != null,
         modifier = modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.primary,
         contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -312,7 +350,10 @@ private fun NewTaskCard(
                         style = MaterialTheme.typography.headlineMedium,
                     )
                     Text(
-                        text = stringResource(R.string.home_new_task_body),
+                        text = stringResource(
+                            if (targets.audio == null) R.string.home_new_task_body_no_audio
+                            else R.string.home_new_task_body,
+                        ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f),
                         modifier = Modifier.padding(top = Spacing.XS),
@@ -324,28 +365,52 @@ private fun NewTaskCard(
                     modifier = Modifier.size(28.dp),
                 )
             }
-            Row(
-                modifier = Modifier.padding(top = Spacing.L),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.S),
-            ) {
-                TaskAction(Icons.Outlined.Description, R.string.home_add_text, onText)
-                TaskAction(Icons.Outlined.AddPhotoAlternate, R.string.home_add_image, onImage)
-                TaskAction(Icons.Outlined.GraphicEq, R.string.home_add_audio, onAudio)
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(top = Spacing.L)) {
+                val stackActions = maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f ||
+                    targets.text != ToolId.ASK || targets.image != ToolId.IMAGE
+                if (stackActions) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Spacing.S)) {
+                        shortcuts.forEach { shortcut ->
+                            TaskAction(shortcut.icon, shortcut.labelRes,
+                                { onOpenTool(shortcut.target) }, Modifier.fillMaxWidth())
+                        }
+                    }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.S)) {
+                        shortcuts.forEach { shortcut ->
+                            TaskAction(shortcut.icon, shortcut.labelRes,
+                                { onOpenTool(shortcut.target) })
+                        }
+                    }
+                }
             }
         }
     }
 }
 
+private data class TaskShortcut(
+    val icon: ImageVector,
+    @StringRes val labelRes: Int,
+    val target: ToolId,
+)
+
 @Composable
-private fun TaskAction(icon: ImageVector, labelRes: Int, onClick: () -> Unit) {
+private fun TaskAction(
+    icon: ImageVector,
+    @StringRes labelRes: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Surface(
         onClick = onClick,
+        modifier = modifier,
         color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.08f),
         contentColor = MaterialTheme.colorScheme.onPrimary,
         shape = MaterialTheme.shapes.small,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = Spacing.M, vertical = Spacing.S),
+            modifier = Modifier.heightIn(min = Spacing.MinTouchTarget)
+                .padding(horizontal = Spacing.M, vertical = Spacing.S),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))

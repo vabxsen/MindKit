@@ -41,6 +41,51 @@ class HomeCapabilityMappingTest {
         val ask = state.tools.single { it.toolId == ToolId.ASK }
         assertThat(ask.enabled).isFalse()
         assertThat(ask.status).isEqualTo(AiCapabilityStatus.UNSUPPORTED)
+        assertThat(state.newTaskTargets()).isEqualTo(
+            NewTaskTargets(ToolId.TRANSLATE, ToolId.OCR, ToolId.TRANSCRIBE),
+        )
+    }
+
+    @Test
+    fun `New task keeps Gemini Nano routes when they are ready`() {
+        val state = snapshotOf(FakeCapabilityManager.supportedDevice()).toUiState()
+
+        assertThat(state.newTaskTargets()).isEqualTo(
+            NewTaskTargets(ToolId.ASK, ToolId.IMAGE, ToolId.TRANSCRIBE),
+        )
+    }
+
+    @Test
+    fun `New task prefers ready local tools over AI models that still need download`() {
+        val state = snapshotOf(FakeCapabilityManager.downloadRequiredDevice()).toUiState()
+
+        assertThat(state.newTaskTargets()).isEqualTo(
+            NewTaskTargets(ToolId.TRANSLATE, ToolId.OCR, ToolId.TRANSCRIBE),
+        )
+    }
+
+    @Test
+    fun `New task removes unsupported audio and never chooses an unsupported primary`() {
+        val capabilities = FakeCapabilityManager.unsupportedDevice() +
+            (AiTask.BASIC_TRANSCRIPTION to AiCapability.unsupported(AiTask.BASIC_TRANSCRIPTION))
+        val state = snapshotOf(capabilities).toUiState()
+
+        assertThat(state.newTaskTargets()).isEqualTo(
+            NewTaskTargets(ToolId.TRANSLATE, ToolId.OCR, null),
+        )
+        assertThat(state.newTaskTargets().primary).isEqualTo(ToolId.TRANSLATE)
+    }
+
+    @Test
+    fun `New task has no enabled shortcut when every relevant tool is unsupported`() {
+        val state = HomePreviewStates.supported.copy(
+            tools = HomePreviewStates.supported.tools.map {
+                it.copy(status = AiCapabilityStatus.UNSUPPORTED)
+            },
+        )
+
+        assertThat(state.newTaskTargets()).isEqualTo(NewTaskTargets(null, null, null))
+        assertThat(state.newTaskTargets().primary).isNull()
     }
 
     @Test
@@ -57,6 +102,9 @@ class HomeCapabilityMappingTest {
         val state = DeviceAiSnapshot().toUiState()
 
         assertThat(state.readiness).isEqualTo(DeviceReadiness.CHECKING)
+        assertThat(state.newTaskTargets()).isEqualTo(
+            NewTaskTargets(ToolId.TRANSLATE, ToolId.OCR, null),
+        )
     }
 
     @Test

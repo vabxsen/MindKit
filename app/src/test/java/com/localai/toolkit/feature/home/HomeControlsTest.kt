@@ -1,7 +1,10 @@
 package com.localai.toolkit.feature.home
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.unit.Density
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.localai.toolkit.core.designsystem.theme.LocalAiTheme
@@ -9,6 +12,8 @@ import com.localai.toolkit.core.navigation.Destination
 import com.localai.toolkit.core.navigation.ToolCatalog
 import com.localai.toolkit.domain.model.HistoryItem
 import com.localai.toolkit.domain.model.HistoryType
+import com.localai.toolkit.domain.model.AiCapabilityStatus
+import com.localai.toolkit.domain.model.ToolId
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -39,6 +44,66 @@ class HomeControlsTest {
             compose.onNodeWithText(it).performClick()
         }
         assertThat(opened).containsExactly(Destination.ASK, Destination.IMAGE, Destination.TRANSCRIBE, Destination.ASK).inOrder()
+    }
+
+    @Test fun `quick actions on a device without Gemini Nano open usable local tools`() {
+        val opened = mutableListOf<String>()
+        compose.setContent { LocalAiTheme { HomeContent(HomePreviewStates.unsupported, opened::add) } }
+
+        listOf("Translate text", "Extract text", "Add audio", "New task").forEach {
+            compose.onNodeWithText(it).performClick()
+        }
+
+        assertThat(opened).containsExactly(
+            Destination.TRANSLATE, Destination.OCR, Destination.TRANSCRIBE,
+            Destination.TRANSLATE,
+        ).inOrder()
+    }
+
+    @Test fun `large system font keeps audio shortcut on one readable line`() {
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
+                LocalAiTheme { HomeContent(HomePreviewStates.supported, {}) }
+            }
+        }
+
+        val label = compose.onNodeWithText("Add audio").getUnclippedBoundsInRoot()
+        assertThat((label.right - label.left).value).isGreaterThan(50f)
+        assertThat((label.bottom - label.top).value).isLessThan(64f)
+    }
+
+    @Test fun `extra large system font keeps Workspace header sections separate`() {
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 2f)) {
+                LocalAiTheme { HomeContent(HomePreviewStates.unsupported, {}) }
+            }
+        }
+
+        val brand = compose.onNodeWithText("MindKit").getUnclippedBoundsInRoot()
+        val tagline = compose.onNodeWithText("OFFLINE TOOLS FOR CLEARER WORK")
+            .getUnclippedBoundsInRoot()
+        val title = compose.onNodeWithText("Your private workspace").getUnclippedBoundsInRoot()
+        val body = compose.onNodeWithText("Everything happens on this device.")
+            .getUnclippedBoundsInRoot()
+        assertThat(tagline.top.value).isAtLeast(brand.bottom.value)
+        assertThat(title.top.value).isAtLeast(tagline.bottom.value)
+        assertThat(body.top.value).isAtLeast(title.bottom.value)
+    }
+
+    @Test fun `unsupported transcription is not offered as a New task shortcut`() {
+        val state = HomePreviewStates.unsupported.copy(
+            tools = HomePreviewStates.unsupported.tools.map { tool ->
+                if (tool.toolId == ToolId.TRANSCRIBE) {
+                    tool.copy(status = AiCapabilityStatus.UNSUPPORTED)
+                } else tool
+            },
+        )
+        compose.setContent { LocalAiTheme { HomeContent(state, {}) } }
+
+        compose.onNodeWithText("Add audio").assertDoesNotExist()
+        compose.onNodeWithText("Start with text or an image").assertIsDisplayed()
     }
 
     @Test fun `unsupported cards stay disabled while bundled and deterministic tools remain available`() {

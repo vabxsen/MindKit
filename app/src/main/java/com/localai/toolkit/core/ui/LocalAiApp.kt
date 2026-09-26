@@ -23,6 +23,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -98,9 +100,14 @@ internal fun LocalAiAppShell(
                         bottomNavItems.forEach { item ->
                         val selected = currentDestination?.hierarchy
                             ?.any { it.route == item.route } == true
-                        val label = stringResource(item.labelRes)
+                        val label = stringResource(
+                            if (item.route == Destination.HOME && LocalDensity.current.fontScale >= 1.6f) {
+                                R.string.nav_home_compact
+                            } else item.labelRes,
+                        )
                         NavigationBarItem(
                             selected = selected,
+                            modifier = Modifier.testTag("bottom-nav-${item.route}"),
                             onClick = {
                                 navController.navigate(item.route) {
                                     // Single-top with state preservation: switching tabs

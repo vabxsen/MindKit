@@ -25,6 +25,7 @@
 
     <!-- Bottom navigation -->
     <string name="nav_home">Workspace</string>
+    <string name="nav_home_compact">Home</string>
     <string name="nav_history">History</string>
     <string name="nav_settings">Settings</string>
 
@@ -62,9 +63,12 @@
     <string name="home_workspace_body">Everything happens on this device.</string>
     <string name="home_new_task">New task</string>
     <string name="home_new_task_body">Start with text, an image, or your voice</string>
+    <string name="home_new_task_body_no_audio">Start with text or an image</string>
     <string name="home_add_text">Add text</string>
     <string name="home_add_image">Add image</string>
     <string name="home_add_audio">Add audio</string>
+    <string name="home_translate_text">Translate text</string>
+    <string name="home_extract_text">Extract text</string>
     <string name="home_start_with">Start with</string>
     <string name="home_recent">Recent</string>
     <string name="home_recent_empty">Saved work will appear here</string>

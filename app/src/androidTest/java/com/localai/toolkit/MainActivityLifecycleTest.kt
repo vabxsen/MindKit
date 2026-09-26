@@ -9,6 +9,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import com.google.common.truth.Truth.assertThat
+import com.localai.toolkit.core.navigation.Destination
 import com.localai.toolkit.domain.repository.SettingsRepository
 import com.localai.toolkit.feature.share.IncomingShareStore
 import dagger.hilt.android.testing.HiltAndroidRule
@@ -77,7 +78,7 @@ class MainActivityLifecycleTest {
         awaitNode(hasText("Base64") and hasClickAction())
         compose.onNodeWithText("Workspace").assertDoesNotExist()
         Espresso.pressBack()
-        awaitNode(hasText("Workspace") and isSelectable()).assertIsDisplayed()
+        tab("Workspace").assertIsDisplayed()
     }
 
     @Test fun historySearchSurvivesTabSwitchesAndActivityRecreation() {
@@ -198,7 +199,15 @@ class MainActivityLifecycleTest {
         awaitNode(hasText("Text or Base64"))
     }
 
-    private fun tab(label: String) = awaitNode(hasText(label) and isSelectable())
+    private fun tab(label: String): SemanticsNodeInteraction {
+        val route = when (label) {
+            "Workspace" -> Destination.HOME
+            "History" -> Destination.HISTORY
+            "Settings" -> Destination.SETTINGS
+            else -> error("Unknown tab: $label")
+        }
+        return awaitNode(hasTestTag("bottom-nav-$route"))
+    }
 
     private fun awaitNode(matcher: SemanticsMatcher): SemanticsNodeInteraction {
         compose.waitUntil(20_000) { compose.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
